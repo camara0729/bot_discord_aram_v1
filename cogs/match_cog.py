@@ -1,185 +1,182 @@
 # cogs/match_cog.py
-import os
 import discord
-from discord.ext import commands
 from discord import app_commands
-import requests
-import time
-import database as db
-import mmr_calculator as mmr
+from discord.ext import commands
+import itertools
+import re
+from typing import List, Optional
 
-RIOT_API_KEY = os.getenv("RIOT_API_KEY")
-PROVIDER_ID = int(os.getenv("RIOT_TOURNAMENT_PROVIDER_ID"))
-SERVER_URL = os.getenv("SERVER_URL")
+from utils.database_manager import db_manager
+import config
+
+# Variável global para armazenar temporariamente os times gerados
+# Em uma aplicação de produção maior, isso seria gerenciado por um cache (ex: Redis)
+# ou uma tabela de "partidas pendentes" no banco de dados.
+# Para este escopo, uma variável global simples é suficiente.
+last_generated_teams = {}
 
 class MatchCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="criar_partida", description="Gera um código de torneio para uma partida personalizada.")
-    async def create_match(self, interaction: discord.Interaction):
+    @app_commands.command(name="times", description="Forma times balanceados para uma partida de ARAM.")
+    @app_commands.describe(jogadores="Mencione de 2 a 10 jogadores registrados para a partida.")
+    async def times(self, interaction: discord.Interaction, jogadores: str):
+        
         await interaction.response.defer()
         
-        provider_url = "https://americas.api.riotgames.com/lol/tournament-stub/v5/providers"
-        provider_payload = {"region": "NA", "url": SERVER_URL}
-        headers = {"X-Riot-Token": RIOT_API_KEY}
-        
+        # CORREÇÃO: Lógica de parsing de menções de usuário
         try:
-            requests.post(provider_url, json=provider_payload, headers=headers)
-
-            tournament_url = "https://americas.api.riotgames.com/lol/tournament-stub/v5/tournaments"
-            tournament_payload = {"name": f"ARAM_Match_{int(time.time())}", "providerId": PROVIDER_ID}
-            response = requests.post(tournament_url, json=tournament_payload, headers=headers)
-            response.raise_for_status()
-            tournament_id = response.json()
-
-            codes_url = f"https://americas.api.riotgames.com/lol/tournament-stub/v5/codes?count=1&tournamentId={tournament_id}"
-            codes_payload = { "mapType": "HOWLING_ABYSS", "pickType": "ALL_RANDOM", "spectatorType": "NONE", "teamSize": 5 }
-            response = requests.post(codes_url, json=codes_payload, headers=headers)
-            response.raise_for_status()
-            tournament_code = response.json()
-
-            embed = discord.Embed(
-                title="Código de Partida ARAM Gerado!",
-                description="Use este código no cliente do LoL para criar o lobby:\n`Jogar > Personalizada > Torneio`",
-                color=discord.Color.blue()
-            )
-            embed.add_field(name="Código", value=f"**`{tournament_code}`**")
-            embed.set_footer(text="Após a partida, use /registrar_partida com o ID da partida do histórico.")
-            await interaction.followup.send(embed=embed)
-
-        except requests.exceptions.HTTPError as e:
-            await interaction.followup.send(f"Erro ao criar partida: {e.response.status_code} - {e.response.text}")
-        except Exception as e:
-            await interaction.followup.send(f"Ocorreu um erro inesperado: {e}")
-
-    @app_commands.command(name="registrar_partida", description="Registra o resultado de uma partida e atualiza o MMR.")
-    @app_commands.describe(match_id="O ID da partida (ex: NA1_1234567890).")
-    async def register_match(self, interaction: discord.Interaction, match_id: str):
-        await interaction.response.defer()
-
-        if db.get_match_by_id(match_id):
-            await interaction.followup.send("Esta partida já foi registrada.", ephemeral=True)
+            player_ids = [int(uid) for uid in re.findall(r'\d+', jogadores)]
+        except (ValueError, TypeError):
+            await interaction.followup.send("Formato de jogadores inválido. Por favor, mencione os jogadores usando `@`.", ephemeral=True)
             return
 
-        region_prefix = match_id.split('_').upper()
-        region_map = {
-            'NA1': 'americas', 'BR1': 'americas', 'LA1': 'americas', 'LA2': 'americas',
-            'EUW1': 'europe', 'EUN1': 'europe', 'TR1': 'europe', 'RU': 'europe',
-            'KR': 'asia', 'JP1': 'asia'
+        if not (2 <= len(player_ids) <= 10) or len(player_ids) % 2!= 0:
+            await interaction.followup.send("O número de jogadores deve ser par, entre 2 e 10.", ephemeral=True)
+            return
+
+        players_data = []
+        for pid in player_ids:
+            player = await db_manager.get_player(pid)
+            if not player:
+                user = await self.bot.fetch_user(pid)
+                await interaction.followup.send(f"O jogador {user.mention} não está registrado. Use `/registrar`.", ephemeral=True)
+                return
+            players_data.append(player)
+
+        # Algoritmo de balanceamento por força bruta
+        team_size = len(players_data) // 2
+        best_teams = None
+        min_pdl_diff = float('inf')
+
+        for team1_combination in itertools.combinations(players_data, team_size):
+            team1_pdl = sum(p['pdl'] for p in team1_combination)
+            
+            team2_players = [p for p in players_data if p not in team1_combination]
+            team2_pdl = sum(p['pdl'] for p in team2_players)
+            
+            pdl_diff = abs(team1_pdl - team2_pdl)
+            
+            if pdl_diff < min_pdl_diff:
+                min_pdl_diff = pdl_diff
+                best_teams = (list(team1_combination), team2_players)
+
+        # Armazena os times gerados para o comando /resultado
+        global last_generated_teams
+        # CORREÇÃO: Acessa corretamente os times da tupla 'best_teams'
+        last_generated_teams[interaction.channel.id] = {
+            'team1': [p['discord_id'] for p in best_teams],
+            'team2': [p['discord_id'] for p in best_teams[49]]
         }
-        regional_route = region_map.get(region_prefix)
-        if not regional_route:
-            await interaction.followup.send("Prefixo de região do Match ID inválido.", ephemeral=True)
-            return
 
-        url = f"https://{regional_route}.api.riotgames.com/lol/match/v5/matches/{match_id}"
-        headers = {"X-Riot-Token": RIOT_API_KEY}
-
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            match_info = response.json()['info']
-        except requests.exceptions.HTTPError as e:
-            await interaction.followup.send(f"Erro ao buscar dados da partida: {e.response.status_code}. Verifique o ID.", ephemeral=True)
-            return
-
-        participants = match_info['participants']
-        unregistered_players, player_objects = [], []
+        # Cria a resposta visual
+        embed = discord.Embed(title="⚔️ Times Balanceados para o ARAM! ⚔️", color=discord.Color.blue())
         
-        for p in participants:
-            player_record = db.get_player_by_puuid(p['puuid'])
-            if not player_record:
-                unregistered_players.append(p.get('summonerName', p['puuid']))
-            else:
-                player_objects.append(player_record)
+        # CORREÇÃO: Acessa corretamente os times para criar as menções
+        team1_mentions = [f"<@{p['discord_id']}> ({p['pdl']} PDL)" for p in best_teams]
+        team1_total_pdl = sum(p['pdl'] for p in best_teams)
+        embed.add_field(name=f"🔵 Time 1 (Total: {team1_total_pdl} PDL)", value="\n".join(team1_mentions), inline=False)
+
+        team2_mentions = [f"<@{p['discord_id']}> ({p['pdl']} PDL)" for p in best_teams[49]]
+        team2_total_pdl = sum(p['pdl'] for p in best_teams[49])
+        embed.add_field(name=f"🔴 Time 2 (Total: {team2_total_pdl} PDL)", value="\n".join(team2_mentions), inline=False)
         
-        if unregistered_players:
-            await interaction.followup.send(f"Não é possível registrar. Os seguintes jogadores não estão registrados: {', '.join(unregistered_players)}", ephemeral=True)
-            return
-
-        team100_players = [p for p in player_objects if any(part['puuid'] == p['riot_puuid'] and part['teamId'] == 100 for part in participants)]
-        team200_players = [p for p in player_objects if any(part['puuid'] == p['riot_puuid'] and part['teamId'] == 200 for part in participants)]
+        embed.set_footer(text=f"Diferença de PDL: {min_pdl_diff}")
         
-        team100_mmr = sum(p['mmr'] for p in team100_players) / len(team100_players) if team100_players else 1500
-        team200_mmr = sum(p['mmr'] for p in team200_players) / len(team200_players) if team200_players else 1500
-
-        expected_score_100 = mmr.calculate_expected_score(team100_mmr, team200_mmr)
-        expected_score_200 = mmr.calculate_expected_score(team200_mmr, team100_mmr)
-
-        team_stats_100 = self._get_team_total_stats([p for p in participants if p['teamId'] == 100])
-        team_stats_200 = self._get_team_total_stats([p for p in participants if p['teamId'] == 200])
-
-        processed_player_stats = {}
-        mmr_changes_summary = ""
-
-        for p_data in participants:
-            player_record = next((p for p in player_objects if p['riot_puuid'] == p_data['puuid']), None)
-            if not player_record: continue
-
-            is_win, actual_score = p_data['win'], 1 if p_data['win'] else 0
-            expected_score = expected_score_100 if p_data['teamId'] == 100 else expected_score_200
-            team_stats = team_stats_100 if p_data['teamId'] == 100 else team_stats_200
-
-            pdi_modifier = mmr.calculate_pdi(p_data, team_stats, participants)
-            mmr_change = mmr.calculate_mmr_change(player_record['mmr'], player_record['k_factor'], expected_score, actual_score, pdi_modifier)
-
-            stats_update = {
-                'match_id': match_id, 'wins': 1 if is_win else 0, 'losses': 0 if is_win else 1,
-                'lifetime_kills': p_data['kills'], 'lifetime_deaths': p_data['deaths'],
-                'lifetime_assists': p_data['assists'], 'lifetime_damage_dealt': p_data,
-                'lifetime_penta_kills': p_data.get('pentaKills', 0)
-            }
-            
-            new_title, new_achievements = self._check_achievements_and_titles(p_data, participants)
-            db.update_player_after_match(p_data['puuid'], mmr_change, stats_update, new_title, new_achievements)
-            
-            player_name = p_data.get('summonerName', player_record['riot_id'])
-            mmr_changes_summary += f"{player_name}: {player_record['mmr']} -> {player_record['mmr'] + mmr_change} ({'+' if mmr_change >= 0 else ''}{mmr_change})\n"
-            
-            processed_player_stats[p_data['puuid']] = { 'win': is_win, 'champion_name': p_data['championName'], 'kills': p_data['kills'], 'deaths': p_data['deaths'], 'assists': p_data['assists'], 'mmr_change': mmr_change }
-
-        winning_team = next((team for team in match_info['teams'] if team['win']), None)
-        final_match_data = {
-            'match_id': match_id, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(match_info / 1000)),
-            'game_duration_seconds': match_info, 'winning_team_id': winning_team['teamId'] if winning_team else 0,
-            'teams': { '100': {'avg_mmr': team100_mmr, 'players': [p['puuid'] for p in participants if p['teamId'] == 100]}, '200': {'avg_mmr': team200_mmr, 'players': [p['puuid'] for p in participants if p['teamId'] == 200]} },
-            'player_stats': processed_player_stats
-        }
-        db.add_match(final_match_data)
-
-        embed = discord.Embed(title=f"Partida `{match_id}` Registrada!", color=discord.Color.green())
-        embed.add_field(name="Mudanças de MMR", value=f"```{mmr_changes_summary}```", inline=False)
         await interaction.followup.send(embed=embed)
 
-    def _get_team_total_stats(self, team_participants):
-        return {
-            'totalDamageDealtToChampions': sum(p for p in team_participants),
-            'damageSelfMitigated': sum(p for p in team_participants),
-            'timeCCingOthers': sum(p['timeCCingOthers'] for p in team_participants),
-            'supportScore': sum(p.get('totalHeal', 0) + p.get('totalShieldsOnTeammates', 0) for p in team_participants),
-        }
-
-    def _check_achievements_and_titles(self, player_stats, all_participants):
-        achievements, title = [], None
-
-        if player_stats.get('pentaKills', 0) > 0: achievements.append("Pentakill!")
-        if player_stats > 75000: achievements.append("Muralha Impenetrável")
-        if player_stats['timeCCingOthers'] > 100: achievements.append("Maestro do Controle")
-
-        if player_stats == max(p for p in all_participants): title = "O Canhão de Vidro"
-        elif player_stats == max(p for p in all_participants): title = "A Muralha Inabalável"
+    @app_commands.command(name="resultado", description="Reporta o resultado da última partida gerada neste canal.")
+    @app_commands.describe(vencedores="Mencione todos os jogadores do time vencedor.", mvp="O melhor jogador da partida.", bagre="O pior jogador da partida.")
+    async def resultado(self, interaction: discord.Interaction, vencedores: str, mvp: Optional[discord.Member] = None, bagre: Optional[discord.Member] = None):
+        await interaction.response.defer()
         
-        player_support_score = player_stats.get('totalHeal', 0) + player_stats.get('totalShieldsOnTeammates', 0)
-        max_support_score = max(p.get('totalHeal', 0) + p.get('totalShieldsOnTeammates', 0) for p in all_participants)
-        if player_support_score > 0 and player_support_score == max_support_score: title = "O Guardião"
-        
-        min_deaths = min(p['deaths'] for p in all_participants)
-        if player_stats['deaths'] == min_deaths:
-            kda = (player_stats['kills'] + player_stats['assists']) / max(1, player_stats['deaths'])
-            if kda >= 3.0: title = "O Intocável"
+        channel_id = interaction.channel.id
+        if channel_id not in last_generated_teams:
+            await interaction.followup.send("Nenhum time foi gerado recentemente neste canal. Use `/times` primeiro.", ephemeral=True)
+            return
 
-        return title, achievements
+        teams = last_generated_teams[channel_id]
+        all_players_ids = teams['team1'] + teams['team2']
+        
+        # CORREÇÃO: Lógica de parsing de menções de usuário
+        try:
+            winner_ids = {int(uid) for uid in re.findall(r'\d+', vencedores)}
+        except (ValueError, TypeError):
+            await interaction.followup.send("Formato de vencedores inválido. Por favor, mencione os jogadores usando `@`.", ephemeral=True)
+            return
+
+        # Validação
+        if not winner_ids.issubset(set(all_players_ids)):
+            await interaction.followup.send("Um ou mais vencedores mencionados não estavam na partida original.", ephemeral=True)
+            return
+        
+        if mvp and mvp.id not in all_players_ids:
+            await interaction.followup.send("O MVP mencionado não estava na partida.", ephemeral=True)
+            return
+        
+        if bagre and bagre.id not in all_players_ids:
+            await interaction.followup.send("O Bagre mencionado não estava na partida.", ephemeral=True)
+            return
+
+        if mvp and bagre and mvp.id == bagre.id:
+            await interaction.followup.send("O MVP e o Bagre não podem ser o mesmo jogador.", ephemeral=True)
+            return
+
+        # Determina o time vencedor
+        if winner_ids.issubset(set(teams['team1'])):
+            winning_team_num = 1
+            losing_team_ids = teams['team2']
+        elif winner_ids.issubset(set(teams['team2'])):
+            winning_team_num = 2
+            losing_team_ids = teams['team1']
+        else:
+            await interaction.followup.send("Os vencedores mencionados não formam um time completo da partida anterior.", ephemeral=True)
+            return
+
+        # Busca dados dos jogadores para cálculo de PDL
+        winner_players_data = [await db_manager.get_player(pid) for pid in winner_ids]
+        loser_players_data = [await db_manager.get_player(pid) for pid in losing_team_ids]
+
+        avg_pdl_winners = sum(p['pdl'] for p in winner_players_data) / len(winner_players_data)
+        avg_pdl_losers = sum(p['pdl'] for p in loser_players_data) / len(loser_players_data)
+
+        # Cálculo de PDL (Elo)
+        expected_win_winners = 1 / (1 + 10**((avg_pdl_losers - avg_pdl_winners) / 400))
+        pdl_change = int(config.K_FACTOR * (1 - expected_win_winners))
+        
+        # Bônus/Penalidade para MVP e Bagre
+        pdl_change_mvp = pdl_change + config.MVP_BONUS_PDL
+        pdl_change_bagre = -pdl_change - config.BAGRE_PENALTY_PDL
+
+        participants_data = []
+        embed = discord.Embed(title=f"🏁 Resultado da Partida Registrado! 🏁", description=f"Time {winning_team_num} foi o vencedor!", color=discord.Color.gold())
+        
+        # Processa vencedores
+        winner_details = []
+        for p in winner_players_data:
+            delta = pdl_change_mvp if mvp and p['discord_id'] == mvp.id else pdl_change
+            participants_data.append({'discord_id': p['discord_id'], 'team_number': winning_team_num, 'pdl_delta': delta, 'is_mvp': (mvp and p['discord_id'] == mvp.id)})
+            winner_details.append(f"<@{p['discord_id']}>: {p['pdl']} `+{delta}` ➔ **{p['pdl'] + delta} PDL** {'⭐' if mvp and p['discord_id'] == mvp.id else ''}")
+        
+        # Processa perdedores
+        loser_details = []
+        for p in loser_players_data:
+            delta = pdl_change_bagre if bagre and p['discord_id'] == bagre.id else -pdl_change
+            participants_data.append({'discord_id': p['discord_id'], 'team_number': 3 - winning_team_num, 'pdl_delta': delta, 'is_bagre': (bagre and p['discord_id'] == bagre.id)})
+            loser_details.append(f"<@{p['discord_id']}>: {p['pdl']} `{delta}` ➔ **{p['pdl'] + delta} PDL** {'💩' if bagre and p['discord_id'] == bagre.id else ''}")
+
+        # Salva no banco de dados
+        await db_manager.create_match_record(winning_team_num, participants_data)
+
+        embed.add_field(name="🏆 Vencedores", value="\n".join(winner_details), inline=False)
+        embed.add_field(name="💔 Perdedores", value="\n".join(loser_details), inline=False)
+        
+        await interaction.followup.send(embed=embed)
+        
+        # Limpa os times gerados para este canal
+        del last_generated_teams[channel_id]
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(MatchCog(bot))

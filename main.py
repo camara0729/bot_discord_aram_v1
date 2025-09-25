@@ -1,53 +1,62 @@
 # main.py
-import os
 import discord
 from discord.ext import commands
+import asyncio
+import os
 from dotenv import load_dotenv
-import database as db
 
-# Carregar variáveis de ambiente do arquivo.env
+from utils.database_manager import db_manager
+
 load_dotenv()
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
-# Configurar intents do bot
+# Configurações do bot
+TOKEN = os.getenv('DISCORD_TOKEN')
+if not TOKEN:
+    raise ValueError("Token do Discord não encontrado no arquivo .env")
+
+# Configurar intents
 intents = discord.Intents.default()
 intents.message_content = True
+intents.guilds = True
 intents.members = True
 
-class AramBot(commands.Bot):
-    def __init__(self):
-        super().__init__(command_prefix=commands.when_mentioned_or("/"), intents=intents)
+# Criar o bot
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-    async def setup_hook(self):
-        """
-        Hook que é executado após o login, mas antes de conectar ao WebSocket.
-        Ideal para carregar extensões e sincronizar a árvore de comandos.
-        """
-        print("Carregando cogs...")
-        for filename in os.listdir('./cogs'):
-            if filename.endswith('.py'):
-                try:
-                    await self.load_extension(f'cogs.{filename[:-3]}')
-                    print(f'Cog "{filename[:-3]}" carregado com sucesso.')
-                except Exception as e:
-                    print(f'Erro ao carregar o cog "{filename[:-3]}": {e}')
-        
-        try:
-            # Sincroniza os comandos de barra com o Discord
-            synced = await self.tree.sync()
-            print(f"Sincronizados {len(synced)} comandos.")
-        except Exception as e:
-            print(f"Erro ao sincronizar comandos: {e}")
+@bot.event
+async def on_ready():
+    print(f'{bot.user} está online!')
+    
+    # Inicializar o banco de dados
+    print("Inicializando banco de dados...")
+    await db_manager.initialize_database()
+    
+    # Sincronizar comandos slash
+    try:
+        synced = await bot.tree.sync()
+        print(f"Sincronizados {len(synced)} comando(s) slash")
+    except Exception as e:
+        print(f"Erro ao sincronizar comandos: {e}")
 
-    async def on_ready(self):
-        """
-        Evento que é acionado quando o bot está online e pronto.
-        """
-        print(f'Bot conectado como {self.user}')
-        print('Inicializando o banco de dados...')
-        db.initialize_database()
-        print('Banco de dados pronto.')
+# Carregar cogs
+async def load_cogs():
+    for filename in os.listdir('./cogs'):
+        if filename.endswith('.py') and not filename.startswith('__'):
+            cog_name = f'cogs.{filename[:-3]}'
+            try:
+                # Verificar se o cog já está carregado e descarregar se necessário
+                if cog_name in bot.extensions:
+                    await bot.reload_extension(cog_name)
+                    print(f"Recarregado: {cog_name}")
+                else:
+                    await bot.load_extension(cog_name)
+                    print(f"Carregado: {cog_name}")
+            except Exception as e:
+                print(f"Falha ao carregar o cog {filename[:-3]}: {e}")
 
-# Instanciar e executar o bot
-bot = AramBot()
-bot.run(DISCORD_BOT_TOKEN)
+async def main():
+    await load_cogs()
+    await bot.start(TOKEN)
+
+if __name__ == "__main__":
+    asyncio.run(main())
