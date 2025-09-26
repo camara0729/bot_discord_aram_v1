@@ -186,5 +186,131 @@ class DatabaseManager:
             print(f"Erro ao buscar jogadores para balanceamento: {e}")
             return []
 
+    async def update_player_pdl(self, discord_id: int, pdl_change: int) -> bool:
+        """Atualiza o PDL de um jogador (adiciona ou remove)."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players 
+                    SET pdl = pdl + ?, 
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (pdl_change, discord_id))
+                await db.commit()
+                print(f"PDL do jogador {discord_id} atualizado: {'+' if pdl_change >= 0 else ''}{pdl_change}")
+                return True
+        except Exception as e:
+            print(f"Erro ao atualizar PDL: {e}")
+            return False
+
+    async def set_player_pdl(self, discord_id: int, new_pdl: int) -> bool:
+        """Define o PDL de um jogador para um valor específico."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players 
+                    SET pdl = ?, 
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (new_pdl, discord_id))
+                await db.commit()
+                print(f"PDL do jogador {discord_id} definido para: {new_pdl}")
+                return True
+        except Exception as e:
+            print(f"Erro ao definir PDL: {e}")
+            return False
+
+    async def reset_player_pdl(self, discord_id: int) -> bool:
+        """Reseta o PDL de um jogador para o valor padrão."""
+        return await self.set_player_pdl(discord_id, config.DEFAULT_PDL)
+
+    async def update_player_mvp_count(self, discord_id: int, mvp_change: int) -> bool:
+        """Atualiza a contagem de MVP de um jogador (adiciona ou remove)."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players 
+                    SET mvp_count = mvp_count + ?, 
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (mvp_change, discord_id))
+                await db.commit()
+                print(f"MVP count do jogador {discord_id} atualizado: {'+' if mvp_change >= 0 else ''}{mvp_change}")
+                return True
+        except Exception as e:
+            print(f"Erro ao atualizar MVP count: {e}")
+            return False
+
+    async def update_player_bagre_count(self, discord_id: int, bagre_change: int) -> bool:
+        """Atualiza a contagem de Bagre de um jogador (adiciona ou remove)."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players 
+                    SET bagre_count = bagre_count + ?, 
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (bagre_change, discord_id))
+                await db.commit()
+                print(f"Bagre count do jogador {discord_id} atualizado: {'+' if bagre_change >= 0 else ''}{bagre_change}")
+                return True
+        except Exception as e:
+            print(f"Erro ao atualizar Bagre count: {e}")
+            return False
+
+    async def set_player_mvp_count(self, discord_id: int, new_count: int) -> bool:
+        """Define a contagem de MVP de um jogador para um valor específico."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players 
+                    SET mvp_count = ?, 
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (new_count, discord_id))
+                await db.commit()
+                print(f"MVP count do jogador {discord_id} definido para: {new_count}")
+                return True
+        except Exception as e:
+            print(f"Erro ao definir MVP count: {e}")
+            return False
+
+    async def set_player_bagre_count(self, discord_id: int, new_count: int) -> bool:
+        """Define a contagem de Bagre de um jogador para um valor específico."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players 
+                    SET bagre_count = ?, 
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (new_count, discord_id))
+                await db.commit()
+                print(f"Bagre count do jogador {discord_id} definido para: {new_count}")
+                return True
+        except Exception as e:
+            print(f"Erro ao definir Bagre count: {e}")
+            return False
+
+    async def reset_player_stats(self, discord_id: int) -> bool:
+        """Reseta todas as estatísticas de um jogador (MVPs, Bagres, W/L)."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players 
+                    SET mvp_count = 0, 
+                        bagre_count = 0,
+                        wins = 0,
+                        losses = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (discord_id,))
+                await db.commit()
+                print(f"Estatísticas do jogador {discord_id} resetadas")
+                return True
+        except Exception as e:
+            print(f"Erro ao resetar estatísticas: {e}")
+            return False
+
 # Instância global
 db_manager = DatabaseManager()
