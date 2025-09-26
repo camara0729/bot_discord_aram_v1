@@ -1,6 +1,7 @@
 # migration_startup.py - Adicione ao main.py
 import os
 from pathlib import Path
+from utils.database_manager import db_manager
 
 async def auto_migrate_on_startup():
     """Migra dados automaticamente no primeiro startup do Render."""
