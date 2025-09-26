@@ -42,6 +42,8 @@ async def on_ready():
 async def load_cogs():
     cog_files = [
         'player_cog',
+        'team_cog',
+        'match_cog',
         # Adicione outros cogs aqui conforme necessário
     ]
     

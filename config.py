@@ -78,6 +78,6 @@ def calculate_balance_score(pdl: int, lol_rank: str, wins: int, losses: int) -> 
         win_rate_score = 50  # Neutro para jogadores sem partidas
     
     # Peso final: PDL(60%) + Rank LoL(25%) + Win Rate(15%)
-    final_score = (pdl_score * 0.6) + (rank_score * 0.10) + (win_rate_score * 0.30)
+    final_score = (pdl_score * 0.6) + (rank_score * 0.25) + (win_rate_score * 0.15)
     
     return round(final_score, 2)

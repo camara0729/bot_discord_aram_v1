@@ -2,181 +2,470 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import itertools
+from typing import Optional, List, Dict, Any
+import json
+import os
 import re
-from typing import List, Optional
 
 from utils.database_manager import db_manager
 import config
 
-# Variável global para armazenar temporariamente os times gerados
-# Em uma aplicação de produção maior, isso seria gerenciado por um cache (ex: Redis)
-# ou uma tabela de "partidas pendentes" no banco de dados.
-# Para este escopo, uma variável global simples é suficiente.
-last_generated_teams = {}
-
 class MatchCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.last_teams_file = "last_teams.json"
 
-    @app_commands.command(name="times", description="Forma times balanceados para uma partida de ARAM.")
-    @app_commands.describe(jogadores="Mencione de 2 a 10 jogadores registrados para a partida.")
-    async def times(self, interaction: discord.Interaction, jogadores: str):
-        
+    @app_commands.command(name="registrar_partida", description="Registre o resultado de uma partida ARAM.")
+    @app_commands.describe(
+        vencedor="Qual time venceu a partida",
+        time_azul="Jogadores do time azul (separados por vírgula)",
+        time_vermelho="Jogadores do time vermelho (separados por vírgula)",
+        mvp="Jogador que foi MVP da partida (opcional)",
+        bagre="Jogador que foi Bagre da partida (opcional)"
+    )
+    @app_commands.choices(vencedor=[
+        app_commands.Choice(name="🔵 Time Azul", value="azul"),
+        app_commands.Choice(name="🔴 Time Vermelho", value="vermelho")
+    ])
+    async def registrar_partida(
+        self, 
+        interaction: discord.Interaction, 
+        vencedor: str,
+        time_azul: str,
+        time_vermelho: str,
+        mvp: Optional[discord.Member] = None,
+        bagre: Optional[discord.Member] = None
+    ):
         await interaction.response.defer()
         
-        # CORREÇÃO: Lógica de parsing de menções de usuário
         try:
-            player_ids = [int(uid) for uid in re.findall(r'\d+', jogadores)]
-        except (ValueError, TypeError):
-            await interaction.followup.send("Formato de jogadores inválido. Por favor, mencione os jogadores usando `@`.", ephemeral=True)
-            return
-
-        if not (2 <= len(player_ids) <= 10) or len(player_ids) % 2!= 0:
-            await interaction.followup.send("O número de jogadores deve ser par, entre 2 e 10.", ephemeral=True)
-            return
-
-        players_data = []
-        for pid in player_ids:
-            player = await db_manager.get_player(pid)
-            if not player:
-                user = await self.bot.fetch_user(pid)
-                await interaction.followup.send(f"O jogador {user.mention} não está registrado. Use `/registrar`.", ephemeral=True)
+            # Processar jogadores dos times
+            blue_players = await self._parse_players(interaction, time_azul)
+            red_players = await self._parse_players(interaction, time_vermelho)
+            
+            if not blue_players or not red_players:
+                await interaction.followup.send("❌ Erro ao processar os jogadores dos times!")
                 return
-            players_data.append(player)
-
-        # Algoritmo de balanceamento por força bruta
-        team_size = len(players_data) // 2
-        best_teams = None
-        min_pdl_diff = float('inf')
-
-        for team1_combination in itertools.combinations(players_data, team_size):
-            team1_pdl = sum(p['pdl'] for p in team1_combination)
             
-            team2_players = [p for p in players_data if p not in team1_combination]
-            team2_pdl = sum(p['pdl'] for p in team2_players)
+            # Verificar se todos estão registrados
+            all_players = blue_players + red_players
+            for player in all_players:
+                player_data = await db_manager.get_player(player.id)
+                if not player_data:
+                    await interaction.followup.send(f"❌ {player.mention} não está registrado! Use `/registrar` primeiro.")
+                    return
             
-            pdl_diff = abs(team1_pdl - team2_pdl)
+            # Verificar MVP e Bagre
+            if mvp and mvp not in all_players:
+                await interaction.followup.send("❌ MVP deve estar em um dos times!")
+                return
             
-            if pdl_diff < min_pdl_diff:
-                min_pdl_diff = pdl_diff
-                best_teams = (list(team1_combination), team2_players)
+            if bagre and bagre not in all_players:
+                await interaction.followup.send("❌ Bagre deve estar em um dos times!")
+                return
+            
+            # Determinar vencedores e perdedores
+            winners = blue_players if vencedor == "azul" else red_players
+            losers = red_players if vencedor == "azul" else blue_players
+            
+            # Atualizar estatísticas dos jogadores
+            pdl_changes = {}
+            
+            # Processar vencedores
+            for player in winners:
+                is_mvp = (mvp and player.id == mvp.id)
+                is_bagre = (bagre and player.id == bagre.id)
+                
+                await db_manager.update_player_stats(
+                    discord_id=player.id,
+                    won=True,
+                    is_mvp=is_mvp,
+                    is_bagre=is_bagre
+                )
+                
+                # Calcular mudança de PDL para mostrar
+                pdl_change = config.PDL_WIN
+                if is_mvp:
+                    pdl_change += config.MVP_BONUS
+                if is_bagre:
+                    pdl_change += config.BAGRE_PENALTY
+                
+                pdl_changes[player.id] = pdl_change
+            
+            # Processar perdedores
+            for player in losers:
+                is_mvp = (mvp and player.id == mvp.id)
+                is_bagre = (bagre and player.id == bagre.id)
+                
+                await db_manager.update_player_stats(
+                    discord_id=player.id,
+                    won=False,
+                    is_mvp=is_mvp,
+                    is_bagre=is_bagre
+                )
+                
+                # Calcular mudança de PDL para mostrar
+                pdl_change = config.PDL_LOSS
+                if is_mvp:
+                    pdl_change += config.MVP_BONUS
+                if is_bagre:
+                    pdl_change += config.BAGRE_PENALTY
+                
+                pdl_changes[player.id] = pdl_change
+            
+            # Criar embed de resultado
+            embed = discord.Embed(
+                title="🏆 Partida Registrada!",
+                description=f"Resultado registrado com sucesso!",
+                color=discord.Color.blue() if vencedor == "azul" else discord.Color.red()
+            )
+            
+            # Time vencedor
+            winner_team_name = "🔵 Time Azul" if vencedor == "azul" else "🔴 Time Vermelho"
+            winner_text = ""
+            for player in winners:
+                pdl_change = pdl_changes[player.id]
+                winner_text += f"• {player.mention} (**+{pdl_change}** PDL)\n"
+            
+            embed.add_field(
+                name=f"{winner_team_name} (Vencedor)",
+                value=winner_text,
+                inline=True
+            )
+            
+            # Time perdedor
+            loser_team_name = "🔴 Time Vermelho" if vencedor == "azul" else "🔵 Time Azul"
+            loser_text = ""
+            for player in losers:
+                pdl_change = pdl_changes[player.id]
+                sign = "+" if pdl_change >= 0 else ""
+                loser_text += f"• {player.mention} (**{sign}{pdl_change}** PDL)\n"
+            
+            embed.add_field(
+                name=f"{loser_team_name} (Perdedor)",
+                value=loser_text,
+                inline=True
+            )
+            
+            # MVP e Bagre
+            special_text = ""
+            if mvp:
+                special_text += f"⭐ **MVP:** {mvp.mention} (+{config.MVP_BONUS} PDL extra)\n"
+            if bagre:
+                special_text += f"💩 **Bagre:** {bagre.mention} ({config.BAGRE_PENALTY} PDL extra)\n"
+            
+            if special_text:
+                embed.add_field(name="🎯 Destaques", value=special_text, inline=False)
+            
+            embed.set_footer(text="Use /leaderboard para ver o ranking atualizado!")
+            
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            print(f"Erro ao registrar partida: {e}")
+            await interaction.followup.send(f"❌ Erro ao registrar partida: {str(e)}")
 
-        # Armazena os times gerados para o comando /resultado
-        global last_generated_teams
-        # CORREÇÃO: Acessa corretamente os times da tupla 'best_teams'
-        last_generated_teams[interaction.channel.id] = {
-            'team1': [p['discord_id'] for p in best_teams],
-            'team2': [p['discord_id'] for p in best_teams[49]]
-        }
-
-        # Cria a resposta visual
-        embed = discord.Embed(title="⚔️ Times Balanceados para o ARAM! ⚔️", color=discord.Color.blue())
-        
-        # CORREÇÃO: Acessa corretamente os times para criar as menções
-        team1_mentions = [f"<@{p['discord_id']}> ({p['pdl']} PDL)" for p in best_teams]
-        team1_total_pdl = sum(p['pdl'] for p in best_teams)
-        embed.add_field(name=f"🔵 Time 1 (Total: {team1_total_pdl} PDL)", value="\n".join(team1_mentions), inline=False)
-
-        team2_mentions = [f"<@{p['discord_id']}> ({p['pdl']} PDL)" for p in best_teams[49]]
-        team2_total_pdl = sum(p['pdl'] for p in best_teams[49])
-        embed.add_field(name=f"🔴 Time 2 (Total: {team2_total_pdl} PDL)", value="\n".join(team2_mentions), inline=False)
-        
-        embed.set_footer(text=f"Diferença de PDL: {min_pdl_diff}")
-        
-        await interaction.followup.send(embed=embed)
-
-    @app_commands.command(name="resultado", description="Reporta o resultado da última partida gerada neste canal.")
-    @app_commands.describe(vencedores="Mencione todos os jogadores do time vencedor.", mvp="O melhor jogador da partida.", bagre="O pior jogador da partida.")
-    async def resultado(self, interaction: discord.Interaction, vencedores: str, mvp: Optional[discord.Member] = None, bagre: Optional[discord.Member] = None):
+    @app_commands.command(name="resultado_rapido", description="Registre resultado rapidamente usando os últimos times gerados.")
+    @app_commands.describe(
+        vencedor="Qual time venceu a partida",
+        mvp="Jogador que foi MVP da partida (opcional)",
+        bagre="Jogador que foi Bagre da partida (opcional)"
+    )
+    @app_commands.choices(vencedor=[
+        app_commands.Choice(name="🔵 Time Azul", value="azul"),
+        app_commands.Choice(name="🔴 Time Vermelho", value="vermelho")
+    ])
+    async def resultado_rapido(
+        self, 
+        interaction: discord.Interaction, 
+        vencedor: str,
+        mvp: Optional[discord.Member] = None,
+        bagre: Optional[discord.Member] = None
+    ):
         await interaction.response.defer()
         
-        channel_id = interaction.channel.id
-        if channel_id not in last_generated_teams:
-            await interaction.followup.send("Nenhum time foi gerado recentemente neste canal. Use `/times` primeiro.", ephemeral=True)
-            return
-
-        teams = last_generated_teams[channel_id]
-        all_players_ids = teams['team1'] + teams['team2']
-        
-        # CORREÇÃO: Lógica de parsing de menções de usuário
         try:
-            winner_ids = {int(uid) for uid in re.findall(r'\d+', vencedores)}
-        except (ValueError, TypeError):
-            await interaction.followup.send("Formato de vencedores inválido. Por favor, mencione os jogadores usando `@`.", ephemeral=True)
-            return
+            # Carregar últimos times
+            last_teams = self._load_last_teams(interaction.guild.id)
+            
+            if not last_teams:
+                embed = discord.Embed(
+                    title="❌ Nenhum Time Encontrado",
+                    description="Não há times recentes salvos. Use `/times` primeiro para gerar os times!",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed)
+                return
+            
+            # Converter IDs para objetos Member
+            blue_team = []
+            red_team = []
+            
+            for user_id in last_teams['blue_team']:
+                member = interaction.guild.get_member(user_id)
+                if member:
+                    blue_team.append(member)
+                else:
+                    await interaction.followup.send(f"❌ Jogador do time azul não encontrado (ID: {user_id})")
+                    return
+            
+            for user_id in last_teams['red_team']:
+                member = interaction.guild.get_member(user_id)
+                if member:
+                    red_team.append(member)
+                else:
+                    await interaction.followup.send(f"❌ Jogador do time vermelho não encontrado (ID: {user_id})")
+                    return
+            
+            # Verificar se todos estão registrados
+            all_players = blue_team + red_team
+            for player in all_players:
+                player_data = await db_manager.get_player(player.id)
+                if not player_data:
+                    await interaction.followup.send(f"❌ {player.mention} não está registrado! Use `/registrar` primeiro.")
+                    return
+            
+            # Verificar MVP e Bagre
+            if mvp and mvp not in all_players:
+                await interaction.followup.send("❌ MVP deve estar em um dos times!")
+                return
+            
+            if bagre and bagre not in all_players:
+                await interaction.followup.send("❌ Bagre deve estar em um dos times!")
+                return
+            
+            # Determinar vencedores e perdedores
+            winners = blue_team if vencedor == "azul" else red_team
+            losers = red_team if vencedor == "azul" else blue_team
+            
+            # Atualizar estatísticas dos jogadores
+            pdl_changes = {}
+            
+            # Processar vencedores
+            for player in winners:
+                is_mvp = (mvp and player.id == mvp.id)
+                is_bagre = (bagre and player.id == bagre.id)
+                
+                await db_manager.update_player_stats(
+                    discord_id=player.id,
+                    won=True,
+                    is_mvp=is_mvp,
+                    is_bagre=is_bagre
+                )
+                
+                # Calcular mudança de PDL para mostrar
+                pdl_change = config.PDL_WIN
+                if is_mvp:
+                    pdl_change += config.MVP_BONUS
+                if is_bagre:
+                    pdl_change += config.BAGRE_PENALTY
+                
+                pdl_changes[player.id] = pdl_change
+            
+            # Processar perdedores
+            for player in losers:
+                is_mvp = (mvp and player.id == mvp.id)
+                is_bagre = (bagre and player.id == bagre.id)
+                
+                await db_manager.update_player_stats(
+                    discord_id=player.id,
+                    won=False,
+                    is_mvp=is_mvp,
+                    is_bagre=is_bagre
+                )
+                
+                # Calcular mudança de PDL para mostrar
+                pdl_change = config.PDL_LOSS
+                if is_mvp:
+                    pdl_change += config.MVP_BONUS
+                if is_bagre:
+                    pdl_change += config.BAGRE_PENALTY
+                
+                pdl_changes[player.id] = pdl_change
+            
+            # Criar embed de resultado
+            embed = discord.Embed(
+                title="⚡ Resultado Rápido Registrado!",
+                description=f"Partida registrada usando os últimos times gerados!",
+                color=discord.Color.blue() if vencedor == "azul" else discord.Color.red()
+            )
+            
+            # Time vencedor
+            winner_team_name = "🔵 Time Azul" if vencedor == "azul" else "🔴 Time Vermelho"
+            winner_text = ""
+            for player in winners:
+                pdl_change = pdl_changes[player.id]
+                winner_text += f"• {player.mention} (**+{pdl_change}** PDL)\n"
+            
+            embed.add_field(
+                name=f"{winner_team_name} (Vencedor)",
+                value=winner_text,
+                inline=True
+            )
+            
+            # Time perdedor
+            loser_team_name = "🔴 Time Vermelho" if vencedor == "azul" else "🔵 Time Azul"
+            loser_text = ""
+            for player in losers:
+                pdl_change = pdl_changes[player.id]
+                sign = "+" if pdl_change >= 0 else ""
+                loser_text += f"• {player.mention} (**{sign}{pdl_change}** PDL)\n"
+            
+            embed.add_field(
+                name=f"{loser_team_name} (Perdedor)",
+                value=loser_text,
+                inline=True
+            )
+            
+            # MVP e Bagre
+            special_text = ""
+            if mvp:
+                special_text += f"⭐ **MVP:** {mvp.mention} (+{config.MVP_BONUS} PDL extra)\n"
+            if bagre:
+                special_text += f"💩 **Bagre:** {bagre.mention} ({config.BAGRE_PENALTY} PDL extra)\n"
+            
+            if special_text:
+                embed.add_field(name="🎯 Destaques", value=special_text, inline=False)
+            
+            embed.set_footer(text="⚡ Resultado registrado rapidamente! Use /leaderboard para ver o ranking.")
+            
+            await interaction.followup.send(embed=embed)
+            
+            # Limpar times salvos após usar
+            self._clear_last_teams(interaction.guild.id)
+            
+        except Exception as e:
+            print(f"Erro ao registrar resultado rápido: {e}")
+            await interaction.followup.send(f"❌ Erro ao registrar resultado rápido: {str(e)}")
 
-        # Validação
-        if not winner_ids.issubset(set(all_players_ids)):
-            await interaction.followup.send("Um ou mais vencedores mencionados não estavam na partida original.", ephemeral=True)
-            return
+    async def _parse_players(self, interaction: discord.Interaction, jogadores_str: str) -> List[discord.Member]:
+        """Processa a string de jogadores e retorna lista de membros válidos."""
+        players = []
         
-        if mvp and mvp.id not in all_players_ids:
-            await interaction.followup.send("O MVP mencionado não estava na partida.", ephemeral=True)
-            return
+        # Regex para encontrar mentions do Discord <@!?id> ou <@id>
+        mention_pattern = r'<@!?(\d+)>'
         
-        if bagre and bagre.id not in all_players_ids:
-            await interaction.followup.send("O Bagre mencionado não estava na partida.", ephemeral=True)
-            return
-
-        if mvp and bagre and mvp.id == bagre.id:
-            await interaction.followup.send("O MVP e o Bagre não podem ser o mesmo jogador.", ephemeral=True)
-            return
-
-        # Determina o time vencedor
-        if winner_ids.issubset(set(teams['team1'])):
-            winning_team_num = 1
-            losing_team_ids = teams['team2']
-        elif winner_ids.issubset(set(teams['team2'])):
-            winning_team_num = 2
-            losing_team_ids = teams['team1']
-        else:
-            await interaction.followup.send("Os vencedores mencionados não formam um time completo da partida anterior.", ephemeral=True)
-            return
-
-        # Busca dados dos jogadores para cálculo de PDL
-        winner_players_data = [await db_manager.get_player(pid) for pid in winner_ids]
-        loser_players_data = [await db_manager.get_player(pid) for pid in losing_team_ids]
-
-        avg_pdl_winners = sum(p['pdl'] for p in winner_players_data) / len(winner_players_data)
-        avg_pdl_losers = sum(p['pdl'] for p in loser_players_data) / len(loser_players_data)
-
-        # Cálculo de PDL (Elo)
-        expected_win_winners = 1 / (1 + 10**((avg_pdl_losers - avg_pdl_winners) / 400))
-        pdl_change = int(config.K_FACTOR * (1 - expected_win_winners))
+        # Primeiro, extrair todas as mentions
+        mentions = re.findall(mention_pattern, jogadores_str)
         
-        # Bônus/Penalidade para MVP e Bagre
-        pdl_change_mvp = pdl_change + config.MVP_BONUS_PDL
-        pdl_change_bagre = -pdl_change - config.BAGRE_PENALTY_PDL
-
-        participants_data = []
-        embed = discord.Embed(title=f"🏁 Resultado da Partida Registrado! 🏁", description=f"Time {winning_team_num} foi o vencedor!", color=discord.Color.gold())
+        for user_id_str in mentions:
+            try:
+                user_id = int(user_id_str)
+                member = interaction.guild.get_member(user_id)
+                if member:
+                    players.append(member)
+                else:
+                    print(f"Membro não encontrado: {user_id}")
+            except ValueError:
+                print(f"ID inválido na mention: {user_id_str}")
         
-        # Processa vencedores
-        winner_details = []
-        for p in winner_players_data:
-            delta = pdl_change_mvp if mvp and p['discord_id'] == mvp.id else pdl_change
-            participants_data.append({'discord_id': p['discord_id'], 'team_number': winning_team_num, 'pdl_delta': delta, 'is_mvp': (mvp and p['discord_id'] == mvp.id)})
-            winner_details.append(f"<@{p['discord_id']}>: {p['pdl']} `+{delta}` ➔ **{p['pdl'] + delta} PDL** {'⭐' if mvp and p['discord_id'] == mvp.id else ''}")
+        # Se não encontrou mentions, tentar processar como nomes/IDs separados
+        if not players:
+            # Remover mentions da string e dividir por vírgula e espaços
+            clean_str = re.sub(mention_pattern, '', jogadores_str)
+            
+            # Dividir por vírgula primeiro
+            parts = [part.strip() for part in clean_str.split(',')]
+            
+            # Depois dividir por espaços
+            all_parts = []
+            for part in parts:
+                if part:
+                    all_parts.extend(part.split())
+            
+            for part in all_parts:
+                part = part.strip()
+                if not part:
+                    continue
+                    
+                # Verificar se é só um ID numérico
+                if part.isdigit():
+                    try:
+                        user_id = int(part)
+                        member = interaction.guild.get_member(user_id)
+                        if member:
+                            players.append(member)
+                        else:
+                            print(f"Membro não encontrado pelo ID: {user_id}")
+                    except ValueError:
+                        print(f"ID inválido: {part}")
+                else:
+                    # Tentar buscar por nome/nick
+                    member = discord.utils.find(
+                        lambda m: m.display_name.lower() == part.lower() or m.name.lower() == part.lower(),
+                        interaction.guild.members
+                    )
+                    if member:
+                        players.append(member)
+                    else:
+                        print(f"Usuário não encontrado: {part}")
         
-        # Processa perdedores
-        loser_details = []
-        for p in loser_players_data:
-            delta = pdl_change_bagre if bagre and p['discord_id'] == bagre.id else -pdl_change
-            participants_data.append({'discord_id': p['discord_id'], 'team_number': 3 - winning_team_num, 'pdl_delta': delta, 'is_bagre': (bagre and p['discord_id'] == bagre.id)})
-            loser_details.append(f"<@{p['discord_id']}>: {p['pdl']} `{delta}` ➔ **{p['pdl'] + delta} PDL** {'💩' if bagre and p['discord_id'] == bagre.id else ''}")
-
-        # Salva no banco de dados
-        await db_manager.create_match_record(winning_team_num, participants_data)
-
-        embed.add_field(name="🏆 Vencedores", value="\n".join(winner_details), inline=False)
-        embed.add_field(name="💔 Perdedores", value="\n".join(loser_details), inline=False)
+        # Remover duplicatas mantendo ordem
+        seen = set()
+        unique_players = []
+        for player in players:
+            if player.id not in seen:
+                seen.add(player.id)
+                unique_players.append(player)
         
-        await interaction.followup.send(embed=embed)
-        
-        # Limpa os times gerados para este canal
-        del last_generated_teams[channel_id]
+        return unique_players
 
+    def _save_last_teams(self, guild_id: int, blue_team: List[int], red_team: List[int]):
+        """Salva os últimos times gerados para uso no resultado rápido."""
+        try:
+            data = {}
+            if os.path.exists(self.last_teams_file):
+                with open(self.last_teams_file, 'r') as f:
+                    data = json.load(f)
+            
+            data[str(guild_id)] = {
+                'blue_team': blue_team,
+                'red_team': red_team,
+                'timestamp': discord.utils.utcnow().isoformat()
+            }
+            
+            with open(self.last_teams_file, 'w') as f:
+                json.dump(data, f, indent=2)
+                
+            print(f"Times salvos para o guild {guild_id}")
+            
+        except Exception as e:
+            print(f"Erro ao salvar times: {e}")
+
+    def _load_last_teams(self, guild_id: int) -> Optional[Dict[str, Any]]:
+        """Carrega os últimos times salvos."""
+        try:
+            if not os.path.exists(self.last_teams_file):
+                return None
+                
+            with open(self.last_teams_file, 'r') as f:
+                data = json.load(f)
+            
+            return data.get(str(guild_id))
+            
+        except Exception as e:
+            print(f"Erro ao carregar times: {e}")
+            return None
+
+    def _clear_last_teams(self, guild_id: int):
+        """Remove os times salvos após usar."""
+        try:
+            if not os.path.exists(self.last_teams_file):
+                return
+                
+            with open(self.last_teams_file, 'r') as f:
+                data = json.load(f)
+            
+            if str(guild_id) in data:
+                del data[str(guild_id)]
+                
+                with open(self.last_teams_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+                    
+                print(f"Times limpos para o guild {guild_id}")
+                
+        except Exception as e:
+            print(f"Erro ao limpar times: {e}")
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(MatchCog(bot))
