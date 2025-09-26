@@ -174,7 +174,7 @@ async def migrate_to_render():
         print(f"1. Faça upload do arquivo '{backup_file}' para seu repositório Git")
         print(f"2. No seu código, use a função restore_database() no startup")
         print(f"3. Configure as variáveis de ambiente no Render:")
-        print(f"   - DISCORD_BOT_TOKEN")
+        print(f"   - DISCORD_TOKEN")
         print(f"   - RIOT_API_KEY")
         print(f"4. O banco será restaurado automaticamente no primeiro deploy")
         

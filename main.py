@@ -14,9 +14,9 @@ from utils.database_manager import db_manager
 load_dotenv()
 
 # Configurações do bot
-TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+TOKEN = os.getenv('DISCORD_TOKEN') or os.getenv('DISCORD_BOT_TOKEN')
 if not TOKEN:
-    raise ValueError("Token do Discord não encontrado no arquivo .env")
+    raise ValueError("Token do Discord não encontrado. Configure a variável DISCORD_TOKEN no Render.")
 
 # Configurações do keep-alive
 PORT = int(os.getenv('PORT', 10000))  # Render usa a porta definida na variável PORT

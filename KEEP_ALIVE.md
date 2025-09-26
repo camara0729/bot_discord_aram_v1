@@ -23,7 +23,7 @@ Este bot implementa um sistema completo para evitar a hibernação no plano grat
 
 ### Variáveis de Ambiente Necessárias:
 ```
-DISCORD_BOT_TOKEN=seu_token_aqui
+DISCORD_TOKEN=seu_token_aqui
 RIOT_API_KEY=sua_chave_aqui
 PORT=10000  # Automático no Render
 RENDER_EXTERNAL_URL=https://seu-bot.onrender.com  # Automático

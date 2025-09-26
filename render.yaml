@@ -6,7 +6,7 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
     envVars:
-      - key: DISCORD_BOT_TOKEN
+      - key: DISCORD_TOKEN
         sync: false
       - key: RIOT_API_KEY
         sync: false
