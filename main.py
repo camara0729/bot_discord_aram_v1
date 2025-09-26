@@ -40,23 +40,37 @@ async def on_ready():
 
 # Carregar cogs
 async def load_cogs():
-    for filename in os.listdir('./cogs'):
-        if filename.endswith('.py') and not filename.startswith('__'):
-            cog_name = f'cogs.{filename[:-3]}'
-            try:
-                # Verificar se o cog já está carregado e descarregar se necessário
-                if cog_name in bot.extensions:
-                    await bot.reload_extension(cog_name)
-                    print(f"Recarregado: {cog_name}")
-                else:
-                    await bot.load_extension(cog_name)
-                    print(f"Carregado: {cog_name}")
-            except Exception as e:
-                print(f"Falha ao carregar o cog {filename[:-3]}: {e}")
+    cog_files = [
+        'player_cog',
+        # Adicione outros cogs aqui conforme necessário
+    ]
+    
+    for cog_name in cog_files:
+        try:
+            await bot.load_extension(f'cogs.{cog_name}')
+            print(f"Carregado: cogs.{cog_name}")
+        except Exception as e:
+            print(f"Falha ao carregar o cog {cog_name}: {e}")
+
+# Comando de saúde para o Render
+@bot.event
+async def setup_hook():
+    await load_cogs()
+
+# Handler de erros global
+@bot.event
+async def on_error(event, *args, **kwargs):
+    print(f"Erro no evento {event}: {args}")
 
 async def main():
-    await load_cogs()
-    await bot.start(TOKEN)
+    try:
+        await bot.start(TOKEN)
+    except KeyboardInterrupt:
+        print("Bot desligado pelo usuário")
+    except Exception as e:
+        print(f"Erro crítico: {e}")
+    finally:
+        await bot.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

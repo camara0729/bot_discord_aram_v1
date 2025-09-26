@@ -1,0 +1,12 @@
+# render.yaml
+services:
+  - type: web
+    name: aram-discord-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: RIOT_API_KEY
+        sync: false
