@@ -1,18 +1,26 @@
 # main.py
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import os
+import aiohttp
+from aiohttp import web
 from dotenv import load_dotenv
+import threading
+from datetime import datetime
 
 from utils.database_manager import db_manager
 
 load_dotenv()
 
 # Configurações do bot
-TOKEN = os.getenv('DISCORD_TOKEN')
+TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 if not TOKEN:
     raise ValueError("Token do Discord não encontrado no arquivo .env")
+
+# Configurações do keep-alive
+PORT = int(os.getenv('PORT', 10000))  # Render usa a porta definida na variável PORT
+RENDER_URL = os.getenv('RENDER_EXTERNAL_URL', f'http://localhost:{PORT}')
 
 # Configurar intents
 intents = discord.Intents.default()
@@ -33,6 +41,12 @@ async def on_ready():
     
     # Migração automática (se necessário)
     await auto_migrate_if_needed()
+    
+    # Iniciar servidor web para keep-alive
+    asyncio.create_task(start_web_server())
+    
+    # Iniciar sistema keep-alive
+    keep_alive_ping.start()
     
     # Sincronizar comandos slash
     try:
@@ -69,6 +83,52 @@ async def auto_migrate_if_needed():
             print(f"📊 Banco já populado com {len(players)} jogadores")
     else:
         print("📋 Nenhum backup de migração encontrado")
+
+# Sistema de Keep-Alive para evitar hibernação
+async def health_check(request):
+    """Endpoint de health check para manter o serviço ativo."""
+    return web.json_response({
+        'status': 'alive',
+        'bot': bot.user.name if bot.user else 'Not ready',
+        'timestamp': datetime.now().isoformat(),
+        'guilds': len(bot.guilds),
+        'uptime': 'online'
+    })
+
+async def start_web_server():
+    """Inicia servidor HTTP para keep-alive."""
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    app.router.add_get('/ping', health_check)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    print(f"🌐 Servidor web iniciado na porta {PORT}")
+
+@tasks.loop(minutes=10)
+async def keep_alive_ping():
+    """Faz ping no próprio serviço a cada 10 minutos para evitar hibernação."""
+    try:
+        if RENDER_URL and 'render' in RENDER_URL:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{RENDER_URL}/ping", timeout=30) as response:
+                    if response.status == 200:
+                        print(f"✅ Keep-alive ping successful - {datetime.now().strftime('%H:%M:%S')}")
+                    else:
+                        print(f"⚠️ Keep-alive ping failed: {response.status}")
+        else:
+            print(f"💓 Keep-alive heartbeat - {datetime.now().strftime('%H:%M:%S')}")
+    except Exception as e:
+        print(f"❌ Erro no keep-alive ping: {e}")
+
+@keep_alive_ping.before_loop
+async def before_keep_alive():
+    """Aguarda o bot estar pronto antes de iniciar o keep-alive."""
+    await bot.wait_until_ready()
+    print("🚀 Sistema keep-alive iniciado")
 
 # Carregar cogs
 async def load_cogs():
