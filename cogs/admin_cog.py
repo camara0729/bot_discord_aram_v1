@@ -535,50 +535,6 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {str(e)}")
 
-class ResetStatsConfirmView(discord.ui.View):
-    def __init__(self, player: discord.Member, player_data: dict):
-        super().__init__(timeout=60)
-        self.player = player
-        self.player_data = player_data
-
-    @discord.ui.button(label="✅ SIM, RESETAR", style=discord.ButtonStyle.danger)
-    async def confirm_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            success = await db_manager.reset_player_stats(self.player.id)
-            
-            if success:
-                embed = discord.Embed(
-                    title="✅ Estatísticas Resetadas!",
-                    description=f"Todas as estatísticas de {self.player.mention} foram resetadas com sucesso!",
-                    color=discord.Color.green()
-                )
-                
-                embed.add_field(
-                    name="📊 Estatísticas Resetadas",
-                    value=f"**Vitórias:** {self.player_data['wins']} → 0\n"
-                          f"**Derrotas:** {self.player_data['losses']} → 0\n"
-                          f"**MVPs:** {self.player_data['mvp_count']} → 0\n"
-                          f"**Bagres:** {self.player_data['bagre_count']} → 0",
-                    inline=False
-                )
-                
-                embed.set_footer(text=f"Comando executado por {interaction.user.display_name}")
-                await interaction.response.edit_message(embed=embed, view=None)
-            else:
-                await interaction.response.send_message("❌ Erro ao resetar estatísticas!", ephemeral=True)
-                
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Erro: {str(e)}", ephemeral=True)
-
-    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.secondary)
-    async def cancel_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title="❌ Reset Cancelado",
-            description="Reset das estatísticas foi cancelado.",
-            color=discord.Color.blue()
-        )
-        await interaction.response.edit_message(embed=embed, view=None)
-
     @app_commands.command(name="corrigir_dados", description="[ADMIN] Corrige dados após migração do Render")
     @app_commands.default_permissions(administrator=True)
     async def corrigir_dados(self, interaction: discord.Interaction):
@@ -661,6 +617,52 @@ class ResetStatsConfirmView(discord.ui.View):
                 color=discord.Color.red()
             )
             await interaction.followup.send(embed=embed)
+
+class ResetStatsConfirmView(discord.ui.View):
+    def __init__(self, player: discord.Member, player_data: dict):
+        super().__init__(timeout=60)
+        self.player = player
+        self.player_data = player_data
+
+    @discord.ui.button(label="✅ SIM, RESETAR", style=discord.ButtonStyle.danger)
+    async def confirm_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            success = await db_manager.reset_player_stats(self.player.id)
+            
+            if success:
+                embed = discord.Embed(
+                    title="✅ Estatísticas Resetadas!",
+                    description=f"Todas as estatísticas de {self.player.mention} foram resetadas com sucesso!",
+                    color=discord.Color.green()
+                )
+                
+                embed.add_field(
+                    name="📊 Estatísticas Resetadas",
+                    value=f"**Vitórias:** {self.player_data['wins']} → 0\n"
+                          f"**Derrotas:** {self.player_data['losses']} → 0\n"
+                          f"**MVPs:** {self.player_data['mvp_count']} → 0\n"
+                          f"**Bagres:** {self.player_data['bagre_count']} → 0",
+                    inline=False
+                )
+                
+                embed.set_footer(text=f"Comando executado por {interaction.user.display_name}")
+                await interaction.response.edit_message(embed=embed, view=None)
+            else:
+                await interaction.response.send_message("❌ Erro ao resetar estatísticas!", ephemeral=True)
+                
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erro: {str(e)}", ephemeral=True)
+
+    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.secondary)
+    async def cancel_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="❌ Reset Cancelado",
+            description="Reset das estatísticas foi cancelado.",
+            color=discord.Color.blue()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(AdminCog(bot))

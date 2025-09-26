@@ -151,6 +151,20 @@ async def load_cogs():
 @bot.event
 async def setup_hook():
     await load_cogs()
+    
+    # Sincronizar comandos slash
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Sincronizados {len(synced)} comandos slash")
+    except Exception as e:
+        print(f"❌ Erro ao sincronizar comandos: {e}")
+
+# Evento quando o bot está pronto
+@bot.event
+async def on_ready():
+    print(f"🤖 Bot {bot.user} está online!")
+    print(f"📊 Conectado em {len(bot.guilds)} servidor(s)")
+    print(f"⚡ Comandos disponíveis: {len(bot.tree.get_commands())}")
 
 # Handler de erros global
 @bot.event
