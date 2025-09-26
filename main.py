@@ -31,29 +31,19 @@ intents.members = True
 # Criar o bot
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# Evento para quando o bot estiver pronto
 @bot.event
 async def on_ready():
-    print(f'{bot.user} está online!')
+    print(f"🤖 Bot {bot.user} está online!")
+    print(f"📊 Conectado em {len(bot.guilds)} servidor(s)")
     
     # Inicializar o banco de dados
-    print("Inicializando banco de dados...")
+    print("📚 Inicializando banco de dados...")
     await db_manager.initialize_database()
-    
-    # Migração automática (se necessário)
-    await auto_migrate_if_needed()
-    
-    # Iniciar servidor web para keep-alive
-    asyncio.create_task(start_web_server())
     
     # Iniciar sistema keep-alive
     keep_alive_ping.start()
-    
-    # Sincronizar comandos slash
-    try:
-        synced = await bot.tree.sync()
-        print(f"Sincronizados {len(synced)} comando(s) slash")
-    except Exception as e:
-        print(f"Erro ao sincronizar comandos: {e}")
+    print("🚀 Sistema keep-alive iniciado")
 
 async def auto_migrate_if_needed():
     """Executa migração automática se backup existir e banco estiver vazio."""
@@ -159,12 +149,7 @@ async def setup_hook():
     except Exception as e:
         print(f"❌ Erro ao sincronizar comandos: {e}")
 
-# Evento quando o bot está pronto
-@bot.event
-async def on_ready():
-    print(f"🤖 Bot {bot.user} está online!")
-    print(f"📊 Conectado em {len(bot.guilds)} servidor(s)")
-    print(f"⚡ Comandos disponíveis: {len(bot.tree.get_commands())}")
+
 
 # Handler de erros global
 @bot.event
@@ -173,7 +158,15 @@ async def on_error(event, *args, **kwargs):
 
 async def main():
     try:
-        await bot.start(TOKEN)
+        # Executar migração automática se necessário
+        await auto_migrate_if_needed()
+        
+        # Iniciar servidor web e bot em paralelo
+        await asyncio.gather(
+            start_web_server(),
+            bot.start(TOKEN)
+        )
+            
     except KeyboardInterrupt:
         print("Bot desligado pelo usuário")
     except Exception as e:
