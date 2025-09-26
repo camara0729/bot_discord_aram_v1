@@ -579,5 +579,88 @@ class ResetStatsConfirmView(discord.ui.View):
         )
         await interaction.response.edit_message(embed=embed, view=None)
 
+    @app_commands.command(name="corrigir_dados", description="[ADMIN] Corrige dados após migração do Render")
+    @app_commands.default_permissions(administrator=True)
+    async def corrigir_dados(self, interaction: discord.Interaction):
+        """Corrige os dados dos jogadores após migração"""
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # Dados corretos baseados no backup original
+            corrections = {
+                267713314086191125: {"pdl": 1175, "wins": 7, "losses": 1, "mvp": 5, "bagre": 1, "name": "Sérgio"},
+                267830206302126081: {"pdl": 1065, "wins": 5, "losses": 3, "mvp": 1, "bagre": 1, "name": "mateusabb"},
+                207835175135084544: {"pdl": 1060, "wins": 3, "losses": 1, "mvp": 1, "bagre": 0, "name": "Feitosa"},
+                348276973853999105: {"pdl": 1060, "wins": 4, "losses": 2, "mvp": 0, "bagre": 0, "name": "paredao"},
+                682749260961153144: {"pdl": 980, "wins": 3, "losses": 5, "mvp": 1, "bagre": 0, "name": "Pedro Luiz"},
+                1042259376070742087: {"pdl": 970, "wins": 3, "losses": 5, "mvp": 0, "bagre": 1, "name": "lcris"},
+                297136556966150145: {"pdl": 965, "wins": 3, "losses": 5, "mvp": 0, "bagre": 2, "name": "Fausto"},
+                534894751330205699: {"pdl": 965, "wins": 2, "losses": 4, "mvp": 0, "bagre": 1, "name": "Guilherme"},
+                760704217055756288: {"pdl": 910, "wins": 0, "losses": 4, "mvp": 0, "bagre": 2, "name": "Daydrex"}
+            }
+            
+            corrected_count = 0
+            errors = []
+            
+            # Executar correções usando SQL direto para máxima eficiência
+            import aiosqlite
+            async with aiosqlite.connect("bot_database.db") as db:
+                for discord_id, data in corrections.items():
+                    try:
+                        await db.execute("""
+                            UPDATE players 
+                            SET pdl = ?, wins = ?, losses = ?, mvp_count = ?, bagre_count = ?
+                            WHERE discord_id = ?
+                        """, (data["pdl"], data["wins"], data["losses"], data["mvp"], data["bagre"], discord_id))
+                        corrected_count += 1
+                    except Exception as e:
+                        errors.append(f"{data['name']}: {str(e)}")
+                
+                await db.commit()
+            
+            # Criar embed de resultado
+            if corrected_count > 0:
+                embed = discord.Embed(
+                    title="✅ Correção de Dados Concluída!",
+                    description=f"**{corrected_count}** jogadores tiveram seus dados corrigidos.",
+                    color=discord.Color.green()
+                )
+                
+                embed.add_field(
+                    name="📊 Jogadores Corrigidos",
+                    value="\n".join([f"• {data['name']}" for data in corrections.values()]),
+                    inline=False
+                )
+                
+                if errors:
+                    embed.add_field(
+                        name="⚠️ Erros",
+                        value="\n".join(errors[:5]),  # Limitar a 5 erros
+                        inline=False
+                    )
+                
+                embed.add_field(
+                    name="🏆 Próximo Passo",
+                    value="Execute `/ranking` para ver os dados corretos!",
+                    inline=False
+                )
+                
+            else:
+                embed = discord.Embed(
+                    title="❌ Nenhuma Correção Aplicada",
+                    description="Não foi possível corrigir os dados.",
+                    color=discord.Color.red()
+                )
+                
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Erro na Correção",
+                description=f"Erro durante a correção: {str(e)}",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed)
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(AdminCog(bot))
