@@ -574,11 +574,32 @@ class AdminCog(commands.Cog):
                 
                 await db.commit()
             
+            # Atualizar usernames também
+            updated_names = 0
+            try:
+                all_players = await db_manager.get_all_players()
+                for player in all_players:
+                    try:
+                        user = self.bot.get_user(player['discord_id'])
+                        if not user:
+                            try:
+                                user = await self.bot.fetch_user(player['discord_id'])
+                            except:
+                                user = None
+                        
+                        if user:
+                            await db_manager.update_player_username(player['discord_id'], user.display_name)
+                            updated_names += 1
+                    except:
+                        pass
+            except:
+                pass
+            
             # Criar embed de resultado
             if corrected_count > 0:
                 embed = discord.Embed(
                     title="✅ Correção de Dados Concluída!",
-                    description=f"**{corrected_count}** jogadores tiveram seus dados corrigidos.",
+                    description=f"**{corrected_count}** jogadores corrigidos | **{updated_names}** nomes atualizados",
                     color=discord.Color.green()
                 )
                 
