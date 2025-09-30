@@ -783,6 +783,32 @@ class ResetStatsConfirmView(discord.ui.View):
         )
         await interaction.response.edit_message(embed=embed, view=None)
 
+    @app_commands.command(name="limpar_ids_ficticios", description="[ADMIN] Remove registros com IDs fictícios do banco.")
+    @app_commands.default_permissions(administrator=True)
+    async def limpar_ids_ficticios(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            import aiosqlite
+            async with aiosqlite.connect("bot_database.db") as db:
+                # Remover o ID fictício do Nicous
+                await db.execute("DELETE FROM players WHERE discord_id = ?", (1234567890123456789,))
+                
+                # Remover outros IDs fictícios ou inválidos (muito grandes ou pequenos)
+                await db.execute("DELETE FROM players WHERE discord_id > 9999999999999999999 OR discord_id < 100000000000000000")
+                
+                await db.commit()
+            
+            embed = discord.Embed(
+                title="✅ IDs Fictícios Removidos",
+                description="Registros com IDs fictícios foram removidos do banco de dados.",
+                color=discord.Color.green()
+            )
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro: {str(e)}")
+
     @app_commands.command(name="atualizar_nomes", description="[ADMIN] Atualiza os nomes dos jogadores no banco de dados.")
     @app_commands.default_permissions(administrator=True)
     async def atualizar_nomes(self, interaction: discord.Interaction):
