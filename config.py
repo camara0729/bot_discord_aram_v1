@@ -24,10 +24,11 @@ ELOS = {
     "Prata": {"min": 1000, "max": 1199, "color": 0xC0C0C0, "emoji": "⚪"},
     "Ouro": {"min": 1200, "max": 1399, "color": 0xFFD700, "emoji": "🟡"},
     "Platina": {"min": 1400, "max": 1599, "color": 0x00FFFF, "emoji": "🔵"},
-    "Diamante": {"min": 1600, "max": 1799, "color": 0x87CEEB, "emoji": "💎"},
-    "Mestre": {"min": 1800, "max": 1999, "color": 0x9370DB, "emoji": "🔮"},
-    "Grão-Mestre": {"min": 2000, "max": 2199, "color": 0xFF0000, "emoji": "🔴"},
-    "Desafiante": {"min": 2200, "max": 9999, "color": 0xFFD700, "emoji": "👑"}
+    "Esmeralda": {"min": 1600, "max": 1799, "color": 0x50C878, "emoji": "💚"},
+    "Diamante": {"min": 1800, "max": 1999, "color": 0x87CEEB, "emoji": "💎"},
+    "Mestre": {"min": 2000, "max": 2199, "color": 0x9370DB, "emoji": "🔮"},
+    "Grão-Mestre": {"min": 2200, "max": 2399, "color": 0xFF0000, "emoji": "🔴"},
+    "Desafiante": {"min": 2400, "max": 9999, "color": 0xFFD700, "emoji": "👑"}
 }
 
 # Mapeamento de ranks do LoL para uso no balanceamento (não afeta PDL inicial)
@@ -42,10 +43,12 @@ RANK_WEIGHTS = {
     "OURO IV": 13, "OURO III": 14, "OURO II": 15, "OURO I": 16,
     # Platina
     "PLATINA IV": 17, "PLATINA III": 18, "PLATINA II": 19, "PLATINA I": 20,
+    # Esmeralda
+    "ESMERALDA IV": 21, "ESMERALDA III": 22, "ESMERALDA II": 23, "ESMERALDA I": 24,
     # Diamante
-    "DIAMANTE IV": 21, "DIAMANTE III": 22, "DIAMANTE II": 23, "DIAMANTE I": 24,
+    "DIAMANTE IV": 25, "DIAMANTE III": 26, "DIAMANTE II": 27, "DIAMANTE I": 28,
     # Mestre+
-    "MESTRE": 25, "GRÃO-MESTRE": 26, "DESAFIANTE": 27
+    "MESTRE": 29, "GRÃO-MESTRE": 30, "DESAFIANTE": 31
 }
 
 def get_elo_by_pdl(pdl: int) -> dict:
@@ -67,7 +70,7 @@ def calculate_balance_score(pdl: int, lol_rank: str, wins: int, losses: int) -> 
     
     # Score baseado no rank do LoL
     rank_weight = RANK_WEIGHTS.get(lol_rank.upper(), 10)
-    rank_score = (rank_weight / 27) * 100  # Normalizado para 0-100
+    rank_score = (rank_weight / 31) * 100  # Normalizado para 0-100
     
     # Score baseado na taxa de vitória
     total_games = wins + losses
