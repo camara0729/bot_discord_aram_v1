@@ -809,67 +809,73 @@ class ResetStatsConfirmView(discord.ui.View):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {str(e)}")
 
-    @app_commands.command(name="adicionar_nicous", description="[ADMIN] Adiciona o jogador Nicous com seus dados corretos.")
+    @app_commands.command(name="adicionar_jogador_manual", description="[ADMIN] Adiciona jogador manualmente com dados específicos.")
+    @app_commands.describe(
+        usuario="Usuário do Discord a ser adicionado",
+        riot_id="Riot ID do jogador (ex: Nome#TAG)", 
+        rank_lol="Rank do LoL do jogador",
+        pdl="PDL inicial do jogador",
+        vitorias="Número de vitórias",
+        derrotas="Número de derrotas"
+    )
     @app_commands.default_permissions(administrator=True)
-    async def adicionar_nicous(self, interaction: discord.Interaction):
+    async def adicionar_jogador_manual(
+        self, 
+        interaction: discord.Interaction, 
+        usuario: discord.Member,
+        riot_id: str,
+        rank_lol: str = "BRONZE III",
+        pdl: int = 1000,
+        vitorias: int = 0,
+        derrotas: int = 0
+    ):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            # Primeiro, tentar encontrar se já existe um usuário com nick Nicous
-            nicous_user = None
-            for member in interaction.guild.members:
-                if "nicous" in member.display_name.lower() or "nicous" in member.name.lower():
-                    nicous_user = member
-                    break
-            
-            if nicous_user:
-                # Se encontrou o usuário real, usar o ID real
-                discord_id = nicous_user.id
-                username = nicous_user.display_name
-            else:
-                # Se não encontrou, perguntar qual é o Discord ID
-                await interaction.followup.send(
-                    "❓ Não encontrei o usuário Nicous no servidor.\n"
-                    "Para adicionar corretamente, peça para ele usar `/registrar` com:\n"
-                    "- Riot ID correto\n"
-                    "- Rank do LoL\n\n"
-                    "Depois use `/adicionar_pdl` para ajustar o PDL para 910."
-                )
+            # Validar rank
+            if rank_lol.upper() not in config.RANK_WEIGHTS:
+                valid_ranks = ", ".join(config.RANK_WEIGHTS.keys())
+                await interaction.followup.send(f"❌ Rank '{rank_lol}' inválido. Válidos: {valid_ranks}")
                 return
             
             import aiosqlite
             async with aiosqlite.connect("bot_database.db") as db:
                 # Verificar se já existe
-                async with db.execute("SELECT discord_id FROM players WHERE discord_id = ?", (discord_id,)) as cursor:
+                async with db.execute("SELECT discord_id FROM players WHERE discord_id = ?", (usuario.id,)) as cursor:
                     existing = await cursor.fetchone()
                 
                 if existing:
-                    # Se já existe, apenas atualizar os dados
+                    # Se já existe, atualizar
                     await db.execute("""
                         UPDATE players 
-                        SET pdl = ?, wins = ?, losses = ?, mvp_count = ?, bagre_count = ?, username = ?
+                        SET riot_id = ?, lol_rank = ?, username = ?, pdl = ?, wins = ?, losses = ?, 
+                            updated_at = datetime('now')
                         WHERE discord_id = ?
-                    """, (910, 1, 5, 0, 1, username, discord_id))
+                    """, (riot_id, rank_lol.upper(), usuario.display_name, pdl, vitorias, derrotas, usuario.id))
                     action = "atualizado"
                 else:
-                    # Se não existe, inserir novo registro
+                    # Se não existe, inserir
                     await db.execute("""
                         INSERT INTO players 
                         (discord_id, riot_id, puuid, lol_rank, username, pdl, wins, losses, mvp_count, bagre_count, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-                    """, (discord_id, "Nicous#TAG", "temp_puuid", "BRONZE III", username, 910, 1, 5, 0, 1))
+                    """, (usuario.id, riot_id, "manual_puuid", rank_lol.upper(), usuario.display_name, pdl, vitorias, derrotas, 0, 0))
                     action = "adicionado"
                 
                 await db.commit()
             
+            # Buscar elo info
+            elo_info = config.get_elo_by_pdl(pdl)
+            
             embed = discord.Embed(
-                title="✅ Nicous Adicionado!",
-                description=f"Jogador Nicous foi {action} com sucesso:",
-                color=discord.Color.green()
+                title="✅ Jogador Adicionado!",
+                description=f"{usuario.mention} foi {action} com sucesso:",
+                color=elo_info['color']
             )
-            embed.add_field(name="🏆 PDL", value="910 (Bronze)", inline=True)
-            embed.add_field(name="📊 Record", value="1W/5L", inline=True)
-            embed.add_field(name="👤 Nome", value=username, inline=True)
+            embed.add_field(name="� Riot ID", value=riot_id, inline=True)
+            embed.add_field(name="🏅 Rank LoL", value=rank_lol, inline=True)
+            embed.add_field(name=f"{elo_info['emoji']} PDL", value=f"{pdl} ({elo_info['name']})", inline=True)
+            embed.add_field(name="� Record", value=f"{vitorias}W/{derrotas}L", inline=True)
             embed.set_footer(text="Use /leaderboard para verificar!")
             
             await interaction.followup.send(embed=embed)
