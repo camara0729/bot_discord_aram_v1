@@ -542,18 +542,31 @@ class AdminCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            # Dados corretos baseados no backup original
+            # Dados corretos como mostrados pelo usuário
             corrections = {
-                267713314086191125: {"pdl": 1175, "wins": 7, "losses": 1, "mvp": 5, "bagre": 1, "name": "Sérgio"},
-                267830206302126081: {"pdl": 1065, "wins": 5, "losses": 3, "mvp": 1, "bagre": 1, "name": "mateusabb"},
-                207835175135084544: {"pdl": 1060, "wins": 3, "losses": 1, "mvp": 1, "bagre": 0, "name": "Feitosa"},
-                348276973853999105: {"pdl": 1060, "wins": 4, "losses": 2, "mvp": 0, "bagre": 0, "name": "paredao"},
-                682749260961153144: {"pdl": 980, "wins": 3, "losses": 5, "mvp": 1, "bagre": 0, "name": "Pedro Luiz"},
-                1042259376070742087: {"pdl": 970, "wins": 3, "losses": 5, "mvp": 0, "bagre": 1, "name": "lcris"},
-                297136556966150145: {"pdl": 965, "wins": 3, "losses": 5, "mvp": 0, "bagre": 2, "name": "Fausto"},
-                534894751330205699: {"pdl": 965, "wins": 2, "losses": 4, "mvp": 0, "bagre": 1, "name": "Guilherme"},
-                760704217055756288: {"pdl": 910, "wins": 0, "losses": 4, "mvp": 0, "bagre": 2, "name": "Daydrex"}
+                267830206302126081: {"pdl": 1220, "wins": 12, "losses": 4, "mvp": 2, "bagre": 0, "name": "mateusabb"},
+                207835175135084544: {"pdl": 1115, "wins": 5, "losses": 1, "mvp": 1, "bagre": 0, "name": "Feitosa"},
+                1042259376070742087: {"pdl": 1100, "wins": 8, "losses": 5, "mvp": 1, "bagre": 1, "name": "lcris"},
+                682749260961153144: {"pdl": 1065, "wins": 9, "losses": 9, "mvp": 1, "bagre": 0, "name": "Pedro Luiz"},
+                267713314086191125: {"pdl": 1060, "wins": 8, "losses": 8, "mvp": 2, "bagre": 2, "name": "Sérgio"},
+                348276973853999105: {"pdl": 1045, "wins": 5, "losses": 4, "mvp": 0, "bagre": 0, "name": "paredao"},
+                534894751330205699: {"pdl": 1030, "wins": 8, "losses": 8, "mvp": 1, "bagre": 1, "name": "Guilherme"},
+                760704217055756288: {"pdl": 910, "wins": 0, "losses": 4, "mvp": 0, "bagre": 2, "name": "Daydrex"},
+                297136556966150145: {"pdl": 850, "wins": 5, "losses": 13, "mvp": 0, "bagre": 4, "name": "Fausto"}
             }
+            
+            # Adicionar o Nicous que está faltando
+            nicous_id = None
+            try:
+                # Tentar encontrar Nicous no banco primeiro
+                async with aiosqlite.connect("bot_database.db") as db:
+                    async with db.execute("SELECT discord_id FROM players WHERE riot_id LIKE '%icous%' OR riot_id LIKE '%nknown%'") as cursor:
+                        row = await cursor.fetchone()
+                        if row:
+                            nicous_id = row[0]
+                            corrections[nicous_id] = {"pdl": 910, "wins": 1, "losses": 5, "mvp": 0, "bagre": 1, "name": "Nicous"}
+            except:
+                pass
             
             corrected_count = 0
             errors = []
