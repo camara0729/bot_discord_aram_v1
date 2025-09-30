@@ -809,7 +809,7 @@ class ResetStatsConfirmView(discord.ui.View):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {str(e)}")
 
-    @app_commands.command(name="adicionar_jogador_manual", description="[ADMIN] Adiciona jogador manualmente com dados específicos.")
+    @app_commands.command(name="add_player", description="[ADMIN] Adiciona jogador manualmente com dados específicos.")
     @app_commands.describe(
         usuario="Usuário do Discord a ser adicionado",
         riot_id="Riot ID do jogador (ex: Nome#TAG)", 
@@ -819,7 +819,7 @@ class ResetStatsConfirmView(discord.ui.View):
         derrotas="Número de derrotas"
     )
     @app_commands.default_permissions(administrator=True)
-    async def adicionar_jogador_manual(
+    async def add_player(
         self, 
         interaction: discord.Interaction, 
         usuario: discord.Member,
