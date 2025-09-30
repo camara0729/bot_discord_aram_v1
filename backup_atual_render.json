@@ -1,0 +1,80 @@
+{
+  "backup_date": "2025-09-29T00:00:00",
+  "version": "2.0",
+  "total_players": 10,
+  "description": "Backup dos dados atuais no Render antes das correções de rate limiting",
+  "data": {
+    "players": [
+      {
+        "riot_id": "coquinho3#cria",
+        "pdl": 1195,
+        "wins": 11,
+        "losses": 5,
+        "name": "mateusabb"
+      },
+      {
+        "riot_id": "AmoMinhaMulher#BBG", 
+        "pdl": 1115,
+        "wins": 5,
+        "losses": 1,
+        "name": "Feitosa"
+      },
+      {
+        "riot_id": "PEU#1013",
+        "pdl": 1085,
+        "wins": 9,
+        "losses": 8,
+        "name": "Pedro Luiz"
+      },
+      {
+        "riot_id": "Jajalo#BBG",
+        "pdl": 1080,
+        "wins": 8,
+        "losses": 7,
+        "name": "Sérgio"
+      },
+      {
+        "riot_id": "lcris56#cria1",
+        "pdl": 1075,
+        "wins": 7,
+        "losses": 5,
+        "name": "lcris"
+      },
+      {
+        "riot_id": "FIshyzin#LLL",
+        "pdl": 1055,
+        "wins": 8,
+        "losses": 7,
+        "name": "Guilherme"
+      },
+      {
+        "riot_id": "paredesk1ng#ola",
+        "pdl": 1020,
+        "wins": 4,
+        "losses": 4,
+        "name": "paredao"
+      },
+      {
+        "riot_id": "Unknown#TAG",
+        "pdl": 930,
+        "wins": 1,
+        "losses": 4,
+        "name": "Nicous"
+      },
+      {
+        "riot_id": "DAYDREX#BR1",
+        "pdl": 910,
+        "wins": 0,
+        "losses": 4,
+        "name": "Daydrex"
+      },
+      {
+        "riot_id": "faustin#1412",
+        "pdl": 820,
+        "wins": 4,
+        "losses": 12,
+        "name": "Fausto"
+      }
+    ]
+  }
+}
