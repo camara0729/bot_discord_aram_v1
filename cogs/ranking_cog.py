@@ -10,6 +10,7 @@ class RankingCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="ranking", description="Mostra o ranking de PDL dos jogadores.")
+    @commands.cooldown(1, 5, commands.BucketType.user)  # 1 uso a cada 5 segundos por usuário
     async def ranking(self, interaction: discord.Interaction):
         await interaction.response.defer()
         

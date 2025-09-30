@@ -14,9 +14,35 @@ class TeamCog(commands.Cog):
 
     @app_commands.command(name="times", description="Gere times balanceados para uma partida ARAM.")
     @app_commands.describe(jogadores="Lista de jogadores separados por vírgula (ex: @user1, @user2, @user3...)")
+    @commands.cooldown(1, 10, commands.BucketType.guild)  # 1 uso a cada 10 segundos por servidor
     async def times(self, interaction: discord.Interaction, jogadores: str):
         await interaction.response.defer()
         
+        try:
+            # Adicionar timeout para evitar processos longos
+            import asyncio
+            async def process_teams():
+                return await self._process_team_balancing(interaction, jogadores)
+            
+            # Timeout de 30 segundos
+            result = await asyncio.wait_for(process_teams(), timeout=30.0)
+            return result
+            
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Comando expirou. O processamento demorou muito. Tente com menos jogadores.")
+            return
+        except discord.HTTPException as e:
+            if e.status == 429:
+                await interaction.followup.send("⚠️ Muitas requisições. Aguarde um momento e tente novamente.")
+            else:
+                await interaction.followup.send("❌ Erro de conexão com o Discord. Tente novamente.")
+            return
+        except Exception as e:
+            print(f"Erro no comando times: {e}")
+            await interaction.followup.send("❌ Erro interno. Tente novamente.")
+            return
+    
+    async def _process_team_balancing(self, interaction: discord.Interaction, jogadores: str):
         try:
             # Processar a string de jogadores
             player_list = await self._parse_players(interaction, jogadores)

@@ -28,8 +28,14 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 
-# Criar o bot
-bot = commands.Bot(command_prefix='!', intents=intents)
+# Criar o bot com configurações otimizadas
+bot = commands.Bot(
+    command_prefix='!', 
+    intents=intents,
+    help_command=None,
+    max_messages=1000,
+    chunk_guilds_at_startup=False
+)
 
 # Evento para quando o bot estiver pronto
 @bot.event
@@ -98,19 +104,21 @@ async def start_web_server():
     await site.start()
     print(f"🌐 Servidor web iniciado na porta {PORT}")
 
-@tasks.loop(minutes=10)
+@tasks.loop(minutes=15)
 async def keep_alive_ping():
-    """Faz ping no próprio serviço a cada 10 minutos para evitar hibernação."""
+    """Faz ping no próprio serviço a cada 15 minutos para evitar hibernação."""
     try:
         if RENDER_URL and 'render' in RENDER_URL:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{RENDER_URL}/ping", timeout=30) as response:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+                async with session.get(f"{RENDER_URL}/ping", timeout=60) as response:
                     if response.status == 200:
                         print(f"✅ Keep-alive ping successful - {datetime.now().strftime('%H:%M:%S')}")
                     else:
                         print(f"⚠️ Keep-alive ping failed: {response.status}")
         else:
             print(f"💓 Keep-alive heartbeat - {datetime.now().strftime('%H:%M:%S')}")
+    except asyncio.TimeoutError:
+        print(f"⏰ Keep-alive ping timeout - {datetime.now().strftime('%H:%M:%S')}")
     except Exception as e:
         print(f"❌ Erro no keep-alive ping: {e}")
 
@@ -155,6 +163,19 @@ async def setup_hook():
 @bot.event
 async def on_error(event, *args, **kwargs):
     print(f"Erro no evento {event}: {args}")
+
+# Handler específico para erros de comandos
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"⏱️ Comando em cooldown. Tente novamente em {error.retry_after:.2f} segundos.")
+    elif isinstance(error, discord.HTTPException) and error.status == 429:
+        await ctx.send("⚠️ Rate limit atingido. Aguarde um momento e tente novamente.")
+    elif isinstance(error, asyncio.TimeoutError):
+        await ctx.send("⏰ Comando expirou. Tente novamente.")
+    else:
+        print(f"Erro no comando {ctx.command}: {error}")
+        await ctx.send("❌ Ocorreu um erro interno. Tente novamente.")
 
 async def main():
     try:

@@ -17,6 +17,7 @@ class PlayerCog(commands.Cog):
         riot_id="Seu Riot ID completo (ex: NomeDeInvocador#BR1)", 
         rank="Seu rank atual no LoL (ex: Ouro IV) - usado apenas para balanceamento"
     )
+    @commands.cooldown(1, 30, commands.BucketType.user)  # 1 uso a cada 30 segundos por usuário
     async def registrar(self, interaction: discord.Interaction, riot_id: str, rank: str):
         await interaction.response.defer(ephemeral=True)
         
@@ -36,7 +37,13 @@ class PlayerCog(commands.Cog):
             return
 
         try:
-            puuid = await riot_api_manager.get_puuid_by_riot_id(game_name, tag_line)
+            import asyncio
+            
+            # Adicionar timeout para a chamada da API da Riot
+            async def get_puuid_with_timeout():
+                return await riot_api_manager.get_puuid_by_riot_id(game_name, tag_line)
+            
+            puuid = await asyncio.wait_for(get_puuid_with_timeout(), timeout=15.0)
             print(f"PUUID retornado: {puuid}")
             
             if not puuid:
@@ -62,12 +69,21 @@ class PlayerCog(commands.Cog):
             
             await interaction.followup.send(embed=embed)
             
+        except asyncio.TimeoutError:
+            print("Timeout na API da Riot")
+            await interaction.followup.send("⏰ A verificação do Riot ID demorou muito. Tente novamente em alguns momentos.")
+        except discord.HTTPException as e:
+            if e.status == 429:
+                await interaction.followup.send("⚠️ Muitas requisições. Aguarde um momento e tente novamente.")
+            else:
+                await interaction.followup.send("❌ Erro de conexão. Tente novamente.")
         except Exception as e:
             print(f"Erro durante o registro: {e}")
-            await interaction.followup.send(f"Ocorreu um erro durante o registro: {str(e)}")
+            await interaction.followup.send("❌ Ocorreu um erro interno. Tente novamente.")
 
     @app_commands.command(name="perfil", description="Veja o perfil de um jogador.")
     @app_commands.describe(jogador="O jogador cujo perfil você quer ver (opcional, mostra o seu se não for especificado).")
+    @commands.cooldown(1, 3, commands.BucketType.user)  # 1 uso a cada 3 segundos por usuário
     async def perfil(self, interaction: discord.Interaction, jogador: Optional[discord.Member] = None):
         target_user = jogador or interaction.user
         
@@ -108,6 +124,7 @@ class PlayerCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="leaderboard", description="Veja o ranking dos jogadores.")
+    @commands.cooldown(1, 5, commands.BucketType.user)  # 1 uso a cada 5 segundos por usuário
     async def leaderboard(self, interaction: discord.Interaction):
         players = await db_manager.get_all_players()
         
