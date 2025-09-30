@@ -51,7 +51,7 @@ class PlayerCog(commands.Cog):
                 return
 
             print(f"Salvando no banco de dados...")
-            await db_manager.add_player(interaction.user.id, riot_id, puuid, rank.upper())
+            await db_manager.add_player(interaction.user.id, riot_id, puuid, rank.upper(), interaction.user.display_name)
             print(f"Registro concluído!")
             
             # Buscar elo inicial
@@ -143,9 +143,21 @@ class PlayerCog(commands.Cog):
         
         ranking_text = ""
         for i, player in enumerate(top_players, 1):
-            # Buscar usuário do Discord
+            # Buscar usuário do Discord (com fallback)
             user = self.bot.get_user(player['discord_id'])
-            username = user.display_name if user else "Usuário Desconhecido"
+            if not user:
+                try:
+                    user = await self.bot.fetch_user(player['discord_id'])
+                except:
+                    user = None
+            
+            # Usar nome do Discord ou nome do banco de dados como fallback
+            if user:
+                username = user.display_name
+            elif player.get('username'):
+                username = player['username']
+            else:
+                username = f"ID: {player['discord_id']}"
             
             # Informações do elo
             elo_info = config.get_elo_by_pdl(player['pdl'])

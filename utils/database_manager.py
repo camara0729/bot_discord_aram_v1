@@ -11,13 +11,14 @@ class DatabaseManager:
     async def initialize_database(self):
         """Inicializa o banco de dados e cria as tabelas necessárias."""
         async with aiosqlite.connect(self.db_path) as db:
-            # Tabela de jogadores - Adicionado campo lol_rank
+            # Tabela de jogadores - Adicionado campo lol_rank e username
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS players (
                     discord_id INTEGER PRIMARY KEY,
                     riot_id TEXT NOT NULL,
                     puuid TEXT NOT NULL,
                     lol_rank TEXT NOT NULL,
+                    username TEXT,
                     pdl INTEGER DEFAULT 1000,
                     wins INTEGER DEFAULT 0,
                     losses INTEGER DEFAULT 0,
@@ -28,13 +29,16 @@ class DatabaseManager:
                 )
             ''')
             
-            # Verifica se a coluna lol_rank existe e adiciona se necessário
+            # Verifica se as colunas necessárias existem e adiciona se necessário
             async with db.execute("PRAGMA table_info(players)") as cursor:
                 columns = await cursor.fetchall()
                 column_names = [column[1] for column in columns]
                 if 'lol_rank' not in column_names:
                     await db.execute('ALTER TABLE players ADD COLUMN lol_rank TEXT DEFAULT "PRATA II"')
                     print("Coluna lol_rank adicionada à tabela players")
+                if 'username' not in column_names:
+                    await db.execute('ALTER TABLE players ADD COLUMN username TEXT')
+                    print("Coluna username adicionada à tabela players")
             
             # Tabela de partidas
             await db.execute('''
@@ -74,15 +78,15 @@ class DatabaseManager:
             await db.commit()
             print("Banco de dados inicializado com sucesso!")
 
-    async def add_player(self, discord_id: int, riot_id: str, puuid: str, lol_rank: str) -> bool:
+    async def add_player(self, discord_id: int, riot_id: str, puuid: str, lol_rank: str, username: str = None) -> bool:
         """Adiciona um novo jogador ao banco de dados com PDL padrão."""
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute('''
                     INSERT OR REPLACE INTO players 
-                    (discord_id, riot_id, puuid, lol_rank, pdl, updated_at)
-                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ''', (discord_id, riot_id, puuid, lol_rank, config.DEFAULT_PDL))
+                    (discord_id, riot_id, puuid, lol_rank, username, pdl, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (discord_id, riot_id, puuid, lol_rank, username, config.DEFAULT_PDL))
                 await db.commit()
                 print(f"Jogador {riot_id} adicionado/atualizado com sucesso!")
                 return True
@@ -310,6 +314,22 @@ class DatabaseManager:
                 return True
         except Exception as e:
             print(f"Erro ao resetar estatísticas: {e}")
+            return False
+
+    async def update_player_username(self, discord_id: int, username: str) -> bool:
+        """Atualiza o username de um jogador no banco de dados."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players 
+                    SET username = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (username, discord_id))
+                await db.commit()
+                return True
+        except Exception as e:
+            print(f"Erro ao atualizar username: {e}")
             return False
 
 # Instância global

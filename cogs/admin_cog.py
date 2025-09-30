@@ -749,6 +749,51 @@ class ResetStatsConfirmView(discord.ui.View):
         )
         await interaction.response.edit_message(embed=embed, view=None)
 
+    @app_commands.command(name="atualizar_usernames", description="[ADMIN] Atualiza os usernames dos jogadores no banco de dados.")
+    @app_commands.default_permissions(administrator=True)
+    async def atualizar_usernames(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # Buscar todos os jogadores
+            all_players = await db_manager.get_all_players()
+            if not all_players:
+                await interaction.followup.send("❌ Nenhum jogador encontrado no banco de dados.")
+                return
+                
+            updated_count = 0
+            failed_count = 0
+            
+            for player in all_players:
+                try:
+                    # Tentar buscar o usuário no Discord
+                    user = self.bot.get_user(player['discord_id'])
+                    if not user:
+                        user = await self.bot.fetch_user(player['discord_id'])
+                    
+                    if user:
+                        # Atualizar o username no banco
+                        success = await db_manager.update_player_username(player['discord_id'], user.display_name)
+                        if success:
+                            updated_count += 1
+                        else:
+                            failed_count += 1
+                    else:
+                        failed_count += 1
+                        
+                except Exception as e:
+                    print(f"Erro ao atualizar username do usuário {player['discord_id']}: {e}")
+                    failed_count += 1
+            
+            embed = discord.Embed(
+                title="✅ Usernames Atualizados",
+                description=f"**Atualizados:** {updated_count} jogadores\n**Falharam:** {failed_count} jogadores",
+                color=discord.Color.green()
+            )
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro ao atualizar usernames: {str(e)}")
 
 
 async def setup(bot: commands.Bot):
