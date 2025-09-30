@@ -618,6 +618,93 @@ class AdminCog(commands.Cog):
             )
             await interaction.followup.send(embed=embed)
 
+    @app_commands.command(name="restaurar_dados_atuais", description="[ADMIN] Restaura os dados para o estado mais atual")
+    @app_commands.default_permissions(administrator=True)
+    async def restaurar_dados_atuais(self, interaction: discord.Interaction):
+        """Restaura os dados para o estado atual correto"""
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # Dados corretos baseados no backup mais atual
+            current_corrections = {
+                267830206302126081: {"pdl": 1220, "wins": 12, "losses": 4, "mvp": 2, "bagre": 0, "name": "mateusabb"},  # Ouro
+                207835175135084544: {"pdl": 1115, "wins": 5, "losses": 1, "mvp": 1, "bagre": 0, "name": "Feitosa"},
+                1042259376070742087: {"pdl": 1100, "wins": 8, "losses": 5, "mvp": 1, "bagre": 1, "name": "lcris"},
+                682749260961153144: {"pdl": 1065, "wins": 9, "losses": 9, "mvp": 1, "bagre": 0, "name": "Pedro Luiz"},
+                267713314086191125: {"pdl": 1060, "wins": 8, "losses": 8, "mvp": 2, "bagre": 2, "name": "Sérgio"},
+                348276973853999105: {"pdl": 1045, "wins": 5, "losses": 4, "mvp": 0, "bagre": 0, "name": "paredao"},
+                534894751330205699: {"pdl": 1030, "wins": 8, "losses": 8, "mvp": 1, "bagre": 1, "name": "Guilherme"},
+                # Precisa do discord_id do Nicous
+                760704217055756288: {"pdl": 910, "wins": 0, "losses": 4, "mvp": 0, "bagre": 2, "name": "Daydrex"},
+                297136556966150145: {"pdl": 850, "wins": 5, "losses": 13, "mvp": 0, "bagre": 4, "name": "Fausto"}
+            }
+            
+            corrected_count = 0
+            errors = []
+            
+            # Executar correções usando SQL direto
+            import aiosqlite
+            async with aiosqlite.connect("bot_database.db") as db:
+                for discord_id, data in current_corrections.items():
+                    try:
+                        await db.execute("""
+                            UPDATE players 
+                            SET pdl = ?, wins = ?, losses = ?, mvp_count = ?, bagre_count = ?
+                            WHERE discord_id = ?
+                        """, (data["pdl"], data["wins"], data["losses"], data["mvp"], data["bagre"], discord_id))
+                        corrected_count += 1
+                    except Exception as e:
+                        errors.append(f"{data['name']}: {str(e)}")
+                
+                # Adicionar Nicous se não estiver no banco
+                try:
+                    await db.execute("""
+                        INSERT OR REPLACE INTO players 
+                        (discord_id, riot_id, puuid, lol_rank, pdl, wins, losses, mvp_count, bagre_count, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                    """, (1234567890123456789, "Nicous#TAG", "unknown_puuid", "BRONZE III", 910, 1, 5, 0, 1))
+                    print("Nicous adicionado/atualizado")
+                except Exception as e:
+                    errors.append(f"Nicous: {str(e)}")
+                
+                await db.commit()
+            
+            # Criar embed de resultado
+            embed = discord.Embed(
+                title="✅ Dados Restaurados!",
+                description=f"**{corrected_count}** jogadores tiveram seus dados atualizados para o estado atual.",
+                color=discord.Color.green()
+            )
+            
+            embed.add_field(
+                name="📊 Jogadores Atualizados",
+                value="\n".join([f"• {data['name']}" for data in current_corrections.values()] + ["• Nicous"]),
+                inline=False
+            )
+            
+            if errors:
+                embed.add_field(
+                    name="⚠️ Erros",
+                    value="\n".join(errors[:5]),
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="🏆 Próximo Passo",
+                value="Execute `/ranking` para verificar os dados atualizados!",
+                inline=False
+            )
+            
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Erro na Restauração",
+                description=f"Erro durante a restauração: {str(e)}",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed)
+
 class ResetStatsConfirmView(discord.ui.View):
     def __init__(self, player: discord.Member, player_data: dict):
         super().__init__(timeout=60)

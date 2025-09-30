@@ -68,15 +68,19 @@ async def auto_migrate_if_needed():
                 success = await restore_database(backup_file, confirm=True)
                 if success:
                     print("✅ Migração automática concluída!")
-                    # Remover arquivo de backup após migração bem-sucedida
-                    os.remove(backup_file)
-                    print("🗑️ Arquivo de backup removido")
+                    # Renomear arquivo ao invés de remover para evitar migração repetida
+                    os.rename(backup_file, f"{backup_file}.usado")
+                    print("� Arquivo de backup marcado como usado")
                 else:
                     print("❌ Falha na migração automática!")
             except Exception as e:
                 print(f"❌ Erro na migração automática: {e}")
         else:
-            print(f"📊 Banco já populado com {len(players)} jogadores")
+            print(f"📊 Banco já populado com {len(players)} jogadores - pulando migração")
+            # Se há jogadores mas o backup ainda existe, marcar como usado
+            if Path(backup_file).exists():
+                os.rename(backup_file, f"{backup_file}.usado")
+                print("📁 Backup marcado como usado (banco já tinha dados)")
     else:
         print("📋 Nenhum backup de migração encontrado")
 

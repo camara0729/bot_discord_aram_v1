@@ -185,10 +185,11 @@ class MatchCog(commands.Cog):
         await interaction.response.defer()
         
         try:
-            # Carregar últimos times
-            last_teams = self._load_last_teams(interaction.guild.id)
+            # Importar TeamCog para acessar last_teams
+            from .team_cog import TeamCog
             
-            if not last_teams:
+            # Verificar se há times salvos
+            if not TeamCog.last_teams:
                 embed = discord.Embed(
                     title="❌ Nenhum Time Encontrado",
                     description="Não há times recentes salvos. Use `/times` primeiro para gerar os times!",
@@ -197,25 +198,9 @@ class MatchCog(commands.Cog):
                 await interaction.followup.send(embed=embed)
                 return
             
-            # Converter IDs para objetos Member
-            blue_team = []
-            red_team = []
-            
-            for user_id in last_teams['blue_team']:
-                member = interaction.guild.get_member(user_id)
-                if member:
-                    blue_team.append(member)
-                else:
-                    await interaction.followup.send(f"❌ Jogador do time azul não encontrado (ID: {user_id})")
-                    return
-            
-            for user_id in last_teams['red_team']:
-                member = interaction.guild.get_member(user_id)
-                if member:
-                    red_team.append(member)
-                else:
-                    await interaction.followup.send(f"❌ Jogador do time vermelho não encontrado (ID: {user_id})")
-                    return
+            # Extrair times dos dados salvos
+            blue_team = [player['user'] for player in TeamCog.last_teams['blue']]
+            red_team = [player['user'] for player in TeamCog.last_teams['red']]
             
             # Verificar se todos estão registrados
             all_players = blue_team + red_team
