@@ -392,13 +392,17 @@ class ParticipantSelectionView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
     
     async def balance_teams(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        
         try:
+            await interaction.response.defer()
+            
             # Buscar dados dos jogadores
             players_data = []
             for player in self.participants:
                 player_data = await db_manager.get_player(player.id)
+                if not player_data:
+                    await interaction.followup.send(f"❌ {player.mention} não está registrado!", ephemeral=True)
+                    return
+                    
                 balance_score = config.calculate_balance_score(
                     player_data['pdl'],
                     player_data.get('lol_rank', 'PRATA II'),
@@ -414,6 +418,10 @@ class ParticipantSelectionView(discord.ui.View):
             
             # Gerar teams usando o método existente
             team_cog = interaction.client.get_cog('TeamCog')
+            if not team_cog:
+                await interaction.followup.send("❌ Erro interno: TeamCog não encontrado", ephemeral=True)
+                return
+                
             blue_team, red_team = team_cog._balance_teams(players_data)
             
             # Calcular diferença de força
