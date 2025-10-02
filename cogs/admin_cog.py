@@ -267,5 +267,85 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {str(e)}")
 
+    @app_commands.command(name="restaurar_dados", description="[ADMIN] Restaura os dados para o estado correto atual.")
+    @app_commands.default_permissions(administrator=True)
+    async def restaurar_dados(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # Dados corretos como devem estar
+            corrections = {
+                267830206302126081: {"pdl": 1220, "wins": 12, "losses": 4, "name": "mateusabb"},
+                207835175135084544: {"pdl": 1115, "wins": 5, "losses": 1, "name": "Feitosa"},
+                1042259376070742087: {"pdl": 1100, "wins": 8, "losses": 5, "name": "lcris"},
+                682749260961153144: {"pdl": 1065, "wins": 9, "losses": 9, "name": "Pedro Luiz"},
+                267713314086191125: {"pdl": 1060, "wins": 8, "losses": 8, "name": "Sérgio"},
+                348276973853999105: {"pdl": 1045, "wins": 5, "losses": 4, "name": "paredao"},
+                534894751330205699: {"pdl": 1030, "wins": 8, "losses": 8, "name": "Guilherme"},
+                760704217055756288: {"pdl": 910, "wins": 0, "losses": 4, "name": "Daydrex"},
+                297136556966150145: {"pdl": 850, "wins": 5, "losses": 13, "name": "Fausto"}
+            }
+            
+            import aiosqlite
+            corrected_count = 0
+            errors = []
+            
+            async with aiosqlite.connect("bot_database.db") as db:
+                for discord_id, stats in corrections.items():
+                    try:
+                        # Verificar se o jogador existe
+                        async with db.execute("SELECT discord_id FROM players WHERE discord_id = ?", (discord_id,)) as cursor:
+                            if await cursor.fetchone():
+                                await db.execute("""
+                                    UPDATE players 
+                                    SET pdl = ?, wins = ?, losses = ?, updated_at = CURRENT_TIMESTAMP
+                                    WHERE discord_id = ?
+                                """, (stats["pdl"], stats["wins"], stats["losses"], discord_id))
+                                corrected_count += 1
+                            else:
+                                errors.append(f"{stats['name']} não encontrado")
+                    except Exception as e:
+                        errors.append(f"{stats['name']}: {str(e)}")
+                
+                await db.commit()
+            
+            embed = discord.Embed(
+                title="✅ Dados Restaurados!",
+                description=f"{corrected_count} jogadores tiveram seus dados corrigidos para o estado atual correto.",
+                color=discord.Color.green()
+            )
+            
+            embed.add_field(
+                name="📊 Dados Corrigidos",
+                value="• mateusabb: 1220 PDL, 12W/4L (🟡 Ouro)\n"
+                      "• Feitosa: 1115 PDL, 5W/1L\n"
+                      "• lcris: 1100 PDL, 8W/5L\n"
+                      "• Pedro Luiz: 1065 PDL, 9W/9L\n"
+                      "• Sérgio: 1060 PDL, 8W/8L\n"
+                      "• paredao: 1045 PDL, 5W/4L\n"
+                      "• Guilherme: 1030 PDL, 8W/8L\n"
+                      "• Daydrex: 910 PDL, 0W/4L (🟤 Bronze)\n"
+                      "• Fausto: 850 PDL, 5W/13L (🟤 Bronze)",
+                inline=False
+            )
+            
+            if errors:
+                embed.add_field(
+                    name="⚠️ Erros",
+                    value="\n".join(errors[:5]),
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="🎯 Próximo Passo",
+                value="Execute `/leaderboard` para verificar os dados corretos!\nUse `/ajustar_stats jogador:@Nicous vitorias:1 derrotas:5` para adicionar Nicous.",
+                inline=False
+            )
+            
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro: {str(e)}")
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(AdminCog(bot))

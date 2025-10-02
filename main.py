@@ -108,23 +108,37 @@ async def start_web_server():
     await site.start()
     print(f"🌐 Servidor web iniciado na porta {PORT}")
 
-@tasks.loop(minutes=15)
+@tasks.loop(minutes=10)  # Reduzido para 10 minutos para ser mais agressivo
 async def keep_alive_ping():
-    """Faz ping no próprio serviço a cada 15 minutos para evitar hibernação."""
+    """Faz ping no próprio serviço a cada 10 minutos para evitar hibernação."""
     try:
-        if RENDER_URL and 'render' in RENDER_URL:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
-                async with session.get(f"{RENDER_URL}/ping", timeout=60) as response:
+        render_url = os.getenv('RENDER_EXTERNAL_URL')
+        if render_url:
+            timeout = aiohttp.ClientTimeout(total=30, connect=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(f"{render_url}/ping") as response:
                     if response.status == 200:
-                        print(f"✅ Keep-alive ping successful - {datetime.now().strftime('%H:%M:%S')}")
+                        current_time = datetime.now().strftime('%H:%M:%S')
+                        print(f"✅ Keep-alive ping successful - {current_time}")
                     else:
-                        print(f"⚠️ Keep-alive ping failed: {response.status}")
+                        print(f"⚠️ Keep-alive ping failed: HTTP {response.status}")
         else:
-            print(f"💓 Keep-alive heartbeat - {datetime.now().strftime('%H:%M:%S')}")
+            # Fallback: fazer ping no localhost
+            try:
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(f"http://localhost:{PORT}/health") as response:
+                        current_time = datetime.now().strftime('%H:%M:%S')
+                        print(f"💓 Local keep-alive heartbeat - {current_time}")
+            except:
+                current_time = datetime.now().strftime('%H:%M:%S')
+                print(f"💓 Keep-alive heartbeat (no HTTP) - {current_time}")
+                
     except asyncio.TimeoutError:
         print(f"⏰ Keep-alive ping timeout - {datetime.now().strftime('%H:%M:%S')}")
     except Exception as e:
         print(f"❌ Erro no keep-alive ping: {e}")
+        # Continue funcionando mesmo com erro
 
 @keep_alive_ping.before_loop
 async def before_keep_alive():
