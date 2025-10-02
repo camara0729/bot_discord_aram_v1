@@ -99,6 +99,7 @@ class TeamCog(commands.Cog):
                 elo_info = config.get_elo_by_pdl(player['data']['pdl'])
                 blue_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\n"
                 blue_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\n"
+                blue_text += f"   `⚖️ Score: {player['balance_score']:.2f}`\n"
             
             embed.add_field(
                 name="🔵 Time Azul",
@@ -112,6 +113,7 @@ class TeamCog(commands.Cog):
                 elo_info = config.get_elo_by_pdl(player['data']['pdl'])
                 red_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\n"
                 red_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\n"
+                red_text += f"   `⚖️ Score: {player['balance_score']:.2f}`\n"
             
             embed.add_field(
                 name="🔴 Time Vermelho",
@@ -184,34 +186,18 @@ class TeamCog(commands.Cog):
         return unique_players
 
     def _balance_teams(self, players_data: List[Dict]) -> tuple:
-        """Gera times balanceados usando algoritmo de balanceamento."""
+        """Gera times balanceados usando algoritmo otimizado."""
         # Ordenar por força (balance_score)
         sorted_players = sorted(players_data, key=lambda x: x['balance_score'], reverse=True)
         
         team_size = len(sorted_players) // 2
         
-        # Algoritmo de draft alternado otimizado
-        blue_team = []
-        red_team = []
+        # Para 4 jogadores, usar força bruta para encontrar o melhor balanceamento
+        if len(sorted_players) == 4:
+            return self._balance_teams_4_players(sorted_players)
         
-        # Primeira tentativa: draft alternado simples
-        for i, player in enumerate(sorted_players):
-            if i % 2 == 0:
-                blue_team.append(player)
-            else:
-                red_team.append(player)
-        
-        # Verificar se precisa otimizar
-        blue_strength = sum(p['balance_score'] for p in blue_team)
-        red_strength = sum(p['balance_score'] for p in red_team)
-        
-        # Se a diferença for muito grande, tentar melhorar
-        if abs(blue_strength - red_strength) > 10:
-            best_blue, best_red = self._optimize_teams(sorted_players, team_size)
-            if best_blue and best_red:
-                blue_team, red_team = best_blue, best_red
-        
-        return blue_team, red_team
+        # Para mais jogadores, usar algoritmo otimizado
+        return self._balance_teams_optimized(sorted_players, team_size)
 
     def _optimize_teams(self, players: List[Dict], team_size: int) -> tuple:
         """Otimiza o balanceamento tentando diferentes combinações."""
@@ -248,6 +234,107 @@ class TeamCog(commands.Cog):
                 # Se encontrou balanceamento perfeito, parar
                 if difference < 2:
                     break
+        
+        return best_blue, best_red
+
+    def _balance_teams_4_players(self, players: List[Dict]) -> tuple:
+        """Balanceamento otimizado específico para 4 jogadores usando força bruta."""
+        from itertools import combinations
+        
+        best_difference = float('inf')
+        best_blue = None
+        best_red = None
+        
+        print(f"🧮 Analisando {len(list(combinations(range(4), 2)))} combinações para 4 jogadores:")
+        
+        # Para 4 jogadores, existem apenas 3 combinações possíveis de 2x2
+        combination_num = 1
+        for blue_indices in combinations(range(4), 2):
+            red_indices = [i for i in range(4) if i not in blue_indices]
+            
+            blue_team = [players[i] for i in blue_indices]
+            red_team = [players[i] for i in red_indices]
+            
+            blue_strength = sum(p['balance_score'] for p in blue_team)
+            red_strength = sum(p['balance_score'] for p in red_team)
+            difference = abs(blue_strength - red_strength)
+            
+            blue_names = " + ".join([p['user'].display_name for p in blue_team])
+            red_names = " + ".join([p['user'].display_name for p in red_team])
+            
+            print(f"   Opção {combination_num}: [{blue_names}] vs [{red_names}]")
+            print(f"   Força: {blue_strength:.2f} vs {red_strength:.2f} | Diferença: {difference:.2f}")
+            
+            if difference < best_difference:
+                best_difference = difference
+                best_blue = blue_team
+                best_red = red_team
+            
+            combination_num += 1
+        
+        print(f"✅ Melhor combinação encontrada com diferença de {best_difference:.2f}")
+        return best_blue, best_red
+
+    def _balance_teams_optimized(self, players: List[Dict], team_size: int) -> tuple:
+        """Algoritmo de balanceamento otimizado para mais de 4 jogadores."""
+        # Algoritmo greedy melhorado
+        blue_team = []
+        red_team = []
+        blue_strength = 0
+        red_strength = 0
+        
+        # Adicionar jogadores um por vez, sempre no time mais fraco
+        for player in players:
+            if len(blue_team) == team_size:
+                red_team.append(player)
+                red_strength += player['balance_score']
+            elif len(red_team) == team_size:
+                blue_team.append(player)
+                blue_strength += player['balance_score']
+            else:
+                # Adicionar no time mais fraco
+                if blue_strength <= red_strength:
+                    blue_team.append(player)
+                    blue_strength += player['balance_score']
+                else:
+                    red_team.append(player)
+                    red_strength += player['balance_score']
+        
+        # Tentar otimização por troca se a diferença for muito grande
+        if abs(blue_strength - red_strength) > 5 and len(players) <= 10:
+            optimized_blue, optimized_red = self._try_swaps_optimization(blue_team, red_team)
+            if optimized_blue and optimized_red:
+                blue_team, red_team = optimized_blue, optimized_red
+        
+        return blue_team, red_team
+
+    def _try_swaps_optimization(self, blue_team: List[Dict], red_team: List[Dict]) -> tuple:
+        """Tenta melhorar o balanceamento trocando jogadores entre times."""
+        best_blue = blue_team.copy()
+        best_red = red_team.copy()
+        
+        current_blue_strength = sum(p['balance_score'] for p in blue_team)
+        current_red_strength = sum(p['balance_score'] for p in red_team)
+        best_difference = abs(current_blue_strength - current_red_strength)
+        
+        # Tentar todas as trocas possíveis (1 por 1)
+        for i, blue_player in enumerate(blue_team):
+            for j, red_player in enumerate(red_team):
+                # Calcular nova força após troca
+                new_blue_strength = current_blue_strength - blue_player['balance_score'] + red_player['balance_score']
+                new_red_strength = current_red_strength - red_player['balance_score'] + blue_player['balance_score']
+                new_difference = abs(new_blue_strength - new_red_strength)
+                
+                if new_difference < best_difference:
+                    # Aplicar troca
+                    new_blue = blue_team.copy()
+                    new_red = red_team.copy()
+                    new_blue[i] = red_player
+                    new_red[j] = blue_player
+                    
+                    best_blue = new_blue
+                    best_red = new_red
+                    best_difference = new_difference
         
         return best_blue, best_red
 
