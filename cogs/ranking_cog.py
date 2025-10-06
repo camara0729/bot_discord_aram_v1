@@ -28,8 +28,11 @@ class RankingCog(commands.Cog):
             user = self.bot.get_user(player['discord_id']) or await self.bot.fetch_user(player['discord_id'])
             user_name = user.display_name if user else f"ID: {player['discord_id']}"
             
-            description += (f"{rank_emoji} **{player['pdl']} PDL** - {user_name} "
-                            f"({player['wins']}V / {player['losses']}D)\n")
+            description += (
+                f"{rank_emoji} **{player['pdl']} PDL** - {user_name} "
+                f"({player['wins']}V / {player['losses']}D) • "
+                f"⭐ {player.get('mvp_count', 0)} • 💩 {player.get('bagre_count', 0)}\n"
+            )
         
         embed.description = description
         await interaction.followup.send(embed=embed)

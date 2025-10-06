@@ -273,7 +273,7 @@ class AdminCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            # Dados corretos como devem estar
+            # Dados corretos como devem estar (preserve MVPs/Bagres se já existirem)
             corrections = {
                 267830206302126081: {"pdl": 1220, "wins": 12, "losses": 4, "name": "mateusabb"},
                 207835175135084544: {"pdl": 1115, "wins": 5, "losses": 1, "name": "Feitosa"},
@@ -296,11 +296,17 @@ class AdminCog(commands.Cog):
                         # Verificar se o jogador existe
                         async with db.execute("SELECT discord_id FROM players WHERE discord_id = ?", (discord_id,)) as cursor:
                             if await cursor.fetchone():
+                                # Buscar MVP/Bagre atuais para preservar
+                                async with db.execute("SELECT mvp_count, bagre_count FROM players WHERE discord_id = ?", (discord_id,)) as c2:
+                                    cur = await c2.fetchone()
+                                current_mvp = cur[0] if cur else 0
+                                current_bagre = cur[1] if cur else 0
+
                                 await db.execute("""
                                     UPDATE players 
-                                    SET pdl = ?, wins = ?, losses = ?, updated_at = CURRENT_TIMESTAMP
+                                    SET pdl = ?, wins = ?, losses = ?, mvp_count = ?, bagre_count = ?, updated_at = CURRENT_TIMESTAMP
                                     WHERE discord_id = ?
-                                """, (stats["pdl"], stats["wins"], stats["losses"], discord_id))
+                                """, (stats["pdl"], stats["wins"], stats["losses"], current_mvp, current_bagre, discord_id))
                                 corrected_count += 1
                             else:
                                 errors.append(f"{stats['name']} não encontrado")
@@ -338,7 +344,11 @@ class AdminCog(commands.Cog):
             
             embed.add_field(
                 name="🎯 Próximo Passo",
-                value="Execute `/leaderboard` para verificar os dados corretos!\nUse `/ajustar_stats jogador:@Nicous vitorias:1 derrotas:5` para adicionar Nicous.",
+                value=(
+                    "Execute `/leaderboard` para verificar os dados corretos!\n"
+                    "Se precisar adicionar um jogador faltando, use `/addplayer usuario:@Nicous riot_id:Nick#TAG rank:BRONZE III pdl:910 wins:1 losses:5`.\n"
+                    "Depois ajuste MVPs/Bagres com `/ajustar_stats` se necessário."
+                ),
                 inline=False
             )
             

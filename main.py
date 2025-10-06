@@ -49,6 +49,7 @@ async def on_ready():
     
     # Iniciar sistema keep-alive
     keep_alive_ping.start()
+    periodic_git_backup.start()
     print("🚀 Sistema keep-alive iniciado")
 
 async def auto_migrate_if_needed():
@@ -239,7 +240,16 @@ async def start_web_server():
     await site.start()
     print(f"🌐 Servidor web iniciado na porta {PORT}")
 
-@tasks.loop(minutes=10)  # Reduzido para 10 minutos para ser mais agressivo
+@tasks.loop(hours=1)
+async def periodic_git_backup():
+    """Executa backup Git periodicamente sem impactar o keep-alive."""
+    try:
+        if 'git_backup_system' in globals():
+            await git_backup_system()
+    except Exception as e:
+        print(f"⚠️ Erro no backup periódico: {e}")
+
+@tasks.loop(minutes=8)  # Ping mais frequente para evitar hibernação
 async def keep_alive_ping():
     """Faz ping no próprio serviço a cada 10 minutos para evitar hibernação."""
     try:
@@ -264,9 +274,6 @@ async def keep_alive_ping():
             except:
                 current_time = datetime.now().strftime('%H:%M:%S')
                 print(f"💓 Keep-alive heartbeat (no HTTP) - {current_time}")
-        
-        # Executar backup Git a cada ciclo (se necessário)
-        await git_backup_system()
                 
     except asyncio.TimeoutError:
         print(f"⏰ Keep-alive ping timeout - {datetime.now().strftime('%H:%M:%S')}")
@@ -279,6 +286,10 @@ async def before_keep_alive():
     """Aguarda o bot estar pronto antes de iniciar o keep-alive."""
     await bot.wait_until_ready()
     print("🚀 Sistema keep-alive iniciado")
+
+@periodic_git_backup.before_loop
+async def before_backup():
+    await bot.wait_until_ready()
 
 # Carregar cogs
 async def load_cogs():

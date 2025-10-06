@@ -487,7 +487,7 @@ class ParticipantSelectionView(discord.ui.View):
     
     async def balance_teams(self, interaction: discord.Interaction):
         try:
-            await interaction.response.defer()
+            # Não usar followup.edit_message; edite diretamente a mensagem do componente
             
             # Buscar dados dos jogadores
             players_data = []
@@ -561,7 +561,8 @@ class ParticipantSelectionView(discord.ui.View):
             
             # View com ações finais
             final_view = BalancedTeamsView(blue_team, red_team, self.participants)
-            await interaction.followup.edit_message(interaction.message.id, embed=embed, view=final_view)
+            # Edita a mensagem original do painel de participantes
+            await interaction.message.edit(embed=embed, view=final_view)
             
         except Exception as e:
             await interaction.followup.send(f"❌ Erro ao balancear times: {str(e)}", ephemeral=True)
@@ -662,7 +663,8 @@ class BalancedTeamsView(discord.ui.View):
                 inline=False
             )
             
-            await interaction.followup.edit_message(interaction.message.id, embed=embed, view=self)
+            # Edita a mensagem do componente diretamente após o defer
+            await interaction.message.edit(embed=embed, view=self)
             
         except Exception as e:
             await interaction.followup.send(f"❌ Erro ao rebalancear: {str(e)}", ephemeral=True)
