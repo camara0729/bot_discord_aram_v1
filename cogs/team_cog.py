@@ -33,6 +33,13 @@ class TeamCog(commands.Cog):
         # Criar view com botão de participar
         view = ParticipantSelectionView(participantes, interaction.user)
         await interaction.response.send_message(embed=embed, view=view)
+
+    # Alias para compatibilidade: muitos usuários usam /time
+    @app_commands.command(name="time", description="(Alias de /times) Gere times balanceados para uma partida ARAM.")
+    @app_commands.describe(participantes="Número de participantes (4, 6, 8 ou 10)")
+    @commands.cooldown(1, 10, commands.BucketType.guild)
+    async def time(self, interaction: discord.Interaction, participantes: int):
+        await self.times(interaction, participantes)
     
     async def _process_team_balancing(self, interaction: discord.Interaction, jogadores: str):
         try:

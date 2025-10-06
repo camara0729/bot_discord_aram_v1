@@ -167,7 +167,11 @@ class PlayerCog(commands.Cog):
             
             ranking_text += f"{position_emoji} {elo_info['emoji']} **{username}**\n"
             ranking_text += f"     {elo_info['name']} - {player['pdl']} PDL\n"
-            ranking_text += f"     {player['wins']}W/{player['losses']}L\n\n"
+            ranking_text += (
+                f"     {player['wins']}W/{player['losses']}L • "
+                f"⭐ MVPs: {player.get('mvp_count', 0)} • "
+                f"💩 Bagres: {player.get('bagre_count', 0)}\n\n"
+            )
         
         embed.description = ranking_text
         embed.set_footer(text=f"Total de jogadores: {len(players)}")
