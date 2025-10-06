@@ -70,7 +70,7 @@ async def auto_migrate_if_needed():
                     print("✅ Migração automática concluída!")
                     # Renomear arquivo ao invés de remover para evitar migração repetida
                     os.rename(backup_file, f"{backup_file}.usado")
-                    print("� Arquivo de backup marcado como usado")
+                    print("📁 Arquivo de backup marcado como usado")
                 else:
                     print("❌ Falha na migração automática!")
             except Exception as e:
@@ -83,6 +83,137 @@ async def auto_migrate_if_needed():
                 print("📁 Backup marcado como usado (banco já tinha dados)")
     else:
         print("📋 Nenhum backup de migração encontrado")
+
+async def git_backup_system():
+    """Sistema de backup automático via Git para Render free tier."""
+    import os
+    import subprocess
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    
+    try:
+        # Verificar se estamos no Render (free tier sem persistência)
+        is_render = os.getenv('RENDER')
+        if not is_render:
+            print("📍 Não está no Render - sistema de backup Git desnecessário")
+            return
+            
+        print("🔄 Iniciando sistema de backup Git para Render free tier...")
+        
+        # Configurações
+        backup_frequency_hours = int(os.getenv('BACKUP_FREQUENCY_HOURS', '6'))  # Backup a cada 6h
+        backup_file = "auto_backup_render.json"
+        last_backup_file = ".last_backup_time"
+        
+        # Verificar se precisa fazer backup
+        should_backup = False
+        
+        if Path(last_backup_file).exists():
+            try:
+                with open(last_backup_file, 'r') as f:
+                    last_backup_str = f.read().strip()
+                last_backup = datetime.fromisoformat(last_backup_str)
+                time_since_backup = datetime.now() - last_backup
+                
+                if time_since_backup >= timedelta(hours=backup_frequency_hours):
+                    should_backup = True
+                    print(f"⏰ Último backup: {time_since_backup} atrás - fazendo novo backup")
+                else:
+                    print(f"✅ Backup recente ({time_since_backup} atrás) - aguardando")
+            except:
+                should_backup = True
+                print("⚠️ Erro ao ler horário do último backup - fazendo backup")
+        else:
+            should_backup = True
+            print("🔍 Primeiro backup - criando backup inicial")
+        
+        if should_backup:
+            # Verificar se há dados para backup
+            players = await db_manager.get_all_players()
+            if len(players) > 0:
+                print(f"📊 Fazendo backup de {len(players)} jogadores...")
+                
+                # Import dinâmico
+                from backup_restore_db import backup_database
+                success_file = await backup_database(backup_file)
+                
+                if success_file:
+                    # Tentar fazer commit e push para Git
+                    try:
+                        # Configurar git se necessário
+                        subprocess.run(['git', 'config', '--global', 'user.email', 'render-bot@noreply.com'], 
+                                     capture_output=True, check=False)
+                        subprocess.run(['git', 'config', '--global', 'user.name', 'Render Auto Backup'], 
+                                     capture_output=True, check=False)
+                        
+                        # Add, commit e push
+                        subprocess.run(['git', 'add', backup_file], capture_output=True, check=True)
+                        
+                        commit_msg = f"Auto backup - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {len(players)} players"
+                        subprocess.run(['git', 'commit', '-m', commit_msg], capture_output=True, check=True)
+                        
+                        # Tentar push (pode falhar se não tiver permissões)
+                        result = subprocess.run(['git', 'push'], capture_output=True, check=False)
+                        
+                        if result.returncode == 0:
+                            print("✅ Backup enviado para Git com sucesso!")
+                            
+                            # Salvar timestamp do backup
+                            with open(last_backup_file, 'w') as f:
+                                f.write(datetime.now().isoformat())
+                            
+                        else:
+                            print(f"⚠️ Falha ao enviar backup para Git: {result.stderr.decode()}")
+                            print("💾 Backup local criado, mas não enviado para repositório")
+                        
+                    except subprocess.CalledProcessError as e:
+                        print(f"⚠️ Erro no Git: {e}")
+                        print("💾 Backup local mantido")
+                    except Exception as e:
+                        print(f"⚠️ Erro inesperado no backup Git: {e}")
+                else:
+                    print("❌ Falha ao criar arquivo de backup")
+            else:
+                print("📭 Banco vazio - não há dados para backup")
+                
+    except Exception as e:
+        print(f"❌ Erro no sistema de backup Git: {e}")
+
+async def restore_from_git_backup():
+    """Restaura dados do último backup Git disponível."""
+    import os
+    from pathlib import Path
+    
+    try:
+        backup_files = [
+            "auto_backup_render.json",
+            "render_migration_backup.json",
+            "backup_atual_render.json"
+        ]
+        
+        for backup_file in backup_files:
+            if Path(backup_file).exists():
+                print(f"🔍 Backup encontrado: {backup_file}")
+                
+                # Verificar se banco está vazio
+                players = await db_manager.get_all_players()
+                if not players:
+                    print("🔄 Restaurando dados do backup Git...")
+                    from backup_restore_db import restore_database
+                    success = await restore_database(backup_file, confirm=True)
+                    if success:
+                        print("✅ Dados restaurados do backup Git!")
+                        return True
+                else:
+                    print(f"📊 Banco já tem {len(players)} jogadores - não restaurando")
+                    return True
+        
+        print("📋 Nenhum backup Git encontrado")
+        return False
+        
+    except Exception as e:
+        print(f"❌ Erro ao restaurar do backup Git: {e}")
+        return False
 
 # Sistema de Keep-Alive para evitar hibernação
 async def health_check(request):
@@ -133,6 +264,9 @@ async def keep_alive_ping():
             except:
                 current_time = datetime.now().strftime('%H:%M:%S')
                 print(f"💓 Keep-alive heartbeat (no HTTP) - {current_time}")
+        
+        # Executar backup Git a cada ciclo (se necessário)
+        await git_backup_system()
                 
     except asyncio.TimeoutError:
         print(f"⏰ Keep-alive ping timeout - {datetime.now().strftime('%H:%M:%S')}")
@@ -197,7 +331,10 @@ async def on_command_error(ctx, error):
 
 async def main():
     try:
-        # Executar migração automática se necessário
+        # Sistema de backup/restore para Render free tier
+        await restore_from_git_backup()
+        
+        # Executar migração automática se necessário (sistema legado)
         await auto_migrate_if_needed()
         
         # Iniciar servidor web e bot em paralelo

@@ -347,5 +347,336 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {str(e)}")
 
+    @app_commands.command(name="fazer_backup", description="[ADMIN] Cria backup manual dos dados para Git.")
+    @app_commands.default_permissions(administrator=True)
+    async def fazer_backup(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            import subprocess
+            from datetime import datetime
+            from pathlib import Path
+            from backup_restore_db import backup_database
+            
+            # Verificar quantos dados temos
+            players = await db_manager.get_all_players()
+            if not players:
+                await interaction.followup.send("❌ Não há dados para backup!")
+                return
+                
+            await interaction.followup.send(f"🔄 Criando backup de {len(players)} jogadores...")
+            
+            # Criar backup
+            backup_file = f"manual_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            success_file = await backup_database(backup_file)
+            
+            if success_file:
+                # Tentar enviar para Git
+                try:
+                    # Configurar git
+                    subprocess.run(['git', 'config', '--global', 'user.email', 'admin-bot@noreply.com'], 
+                                 capture_output=True, check=False)
+                    subprocess.run(['git', 'config', '--global', 'user.name', 'Admin Manual Backup'], 
+                                 capture_output=True, check=False)
+                    
+                    # Add e commit
+                    subprocess.run(['git', 'add', success_file], capture_output=True, check=True)
+                    
+                    commit_msg = f"Manual backup by {interaction.user.name} - {len(players)} players"
+                    subprocess.run(['git', 'commit', '-m', commit_msg], capture_output=True, check=True)
+                    
+                    # Tentar push
+                    result = subprocess.run(['git', 'push'], capture_output=True, check=False)
+                    
+                    if result.returncode == 0:
+                        await interaction.followup.send(f"✅ Backup criado e enviado para Git!\n📁 Arquivo: `{success_file}`\n👥 Jogadores: {len(players)}")
+                    else:
+                        await interaction.followup.send(f"⚠️ Backup criado mas falha no Git!\n📁 Arquivo local: `{success_file}`\n```{result.stderr.decode()[:500]}```")
+                        
+                except subprocess.CalledProcessError as e:
+                    await interaction.followup.send(f"⚠️ Backup criado mas erro no Git:\n📁 Arquivo: `{success_file}`\n❌ Erro: {e}")
+                except Exception as e:
+                    await interaction.followup.send(f"⚠️ Backup criado mas erro inesperado:\n📁 Arquivo: `{success_file}`\n❌ Erro: {str(e)}")
+            else:
+                await interaction.followup.send("❌ Falha ao criar arquivo de backup!")
+                
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro: {str(e)}")
+
+    @app_commands.command(name="restaurar_backup", description="[ADMIN] Restaura dados de um backup específico.")
+    @app_commands.describe(arquivo="Nome do arquivo de backup (ex: backup_20240101_120000.json)")
+    @app_commands.default_permissions(administrator=True)
+    async def restaurar_backup(self, interaction: discord.Interaction, arquivo: str):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            from pathlib import Path
+            from backup_restore_db import restore_database
+            
+            # Verificar se arquivo existe
+            if not Path(arquivo).exists():
+                await interaction.followup.send(f"❌ Arquivo não encontrado: `{arquivo}`")
+                return
+            
+            # Verificar dados atuais
+            current_players = await db_manager.get_all_players()
+            
+            # Pedir confirmação se há dados
+            if current_players:
+                embed = discord.Embed(
+                    title="⚠️ CONFIRMAÇÃO NECESSÁRIA",
+                    description=f"Existem **{len(current_players)} jogadores** no banco atual!\n\n**Isso irá SUBSTITUIR todos os dados atuais!**",
+                    color=discord.Color.red()
+                )
+                embed.add_field(
+                    name="Para continuar:",
+                    value=f"Digite `/confirmar_restore arquivo:{arquivo}` nos próximos 60 segundos.",
+                    inline=False
+                )
+                await interaction.followup.send(embed=embed)
+                return
+            
+            # Se não há dados, pode restaurar diretamente
+            await interaction.followup.send(f"🔄 Restaurando dados de `{arquivo}`...")
+            
+            success = await restore_database(arquivo, confirm=True)
+            
+            if success:
+                # Verificar quantos jogadores foram restaurados
+                restored_players = await db_manager.get_all_players()
+                await interaction.followup.send(f"✅ Restauração concluída!\n👥 Jogadores restaurados: {len(restored_players)}")
+            else:
+                await interaction.followup.send("❌ Falha na restauração!")
+                
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro: {str(e)}")
+
+    @app_commands.command(name="confirmar_restore", description="[ADMIN] Confirma a restauração de backup (substitui todos os dados!).")
+    @app_commands.describe(arquivo="Nome do arquivo de backup para restaurar")
+    @app_commands.default_permissions(administrator=True)
+    async def confirmar_restore(self, interaction: discord.Interaction, arquivo: str):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            from pathlib import Path
+            from backup_restore_db import restore_database
+            
+            # Verificar se arquivo existe
+            if not Path(arquivo).exists():
+                await interaction.followup.send(f"❌ Arquivo não encontrado: `{arquivo}`")
+                return
+            
+            await interaction.followup.send(f"🔄 RESTAURANDO DADOS de `{arquivo}`...\n⚠️ **TODOS OS DADOS ATUAIS SERÃO SUBSTITUÍDOS!**")
+            
+            success = await restore_database(arquivo, confirm=True)
+            
+            if success:
+                # Verificar quantos jogadores foram restaurados
+                restored_players = await db_manager.get_all_players()
+                
+                embed = discord.Embed(
+                    title="✅ Restauração Concluída!",
+                    description=f"Dados restaurados com sucesso de `{arquivo}`",
+                    color=discord.Color.green()
+                )
+                embed.add_field(
+                    name="👥 Jogadores Restaurados",
+                    value=f"**{len(restored_players)}** jogadores",
+                    inline=True
+                )
+                embed.add_field(
+                    name="🎯 Próximo Passo",
+                    value="Execute `/leaderboard` para verificar os dados!",
+                    inline=True
+                )
+                
+                await interaction.followup.send(embed=embed)
+            else:
+                await interaction.followup.send("❌ Falha na restauração!")
+                
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro: {str(e)}")
+
+    @app_commands.command(name="status_backup", description="[ADMIN] Verifica status do sistema de backup Git.")
+    @app_commands.default_permissions(administrator=True)
+    async def status_backup(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            import subprocess
+            import os
+            from pathlib import Path
+            from datetime import datetime
+            
+            # Informações básicas
+            players = await db_manager.get_all_players()
+            is_render = os.getenv('RENDER')
+            
+            embed = discord.Embed(
+                title="📊 Status do Sistema de Backup",
+                color=discord.Color.blue()
+            )
+            
+            # Dados atuais
+            embed.add_field(
+                name="📈 Dados Atuais",
+                value=f"👥 **{len(players)}** jogadores registrados\n🏗️ Ambiente: {'Render Free Tier' if is_render else 'Local/Outro'}",
+                inline=False
+            )
+            
+            # Verificar arquivos de backup
+            backup_files = []
+            for pattern in ["*backup*.json", "render_migration_backup.json"]:
+                backup_files.extend(Path('.').glob(pattern))
+            
+            if backup_files:
+                backup_info = ""
+                for file in sorted(backup_files)[:5]:  # Mostrar apenas os 5 mais recentes
+                    stat = file.stat()
+                    size_kb = stat.st_size / 1024
+                    mod_time = datetime.fromtimestamp(stat.st_mtime)
+                    backup_info += f"📁 `{file.name}` ({size_kb:.1f}KB) - {mod_time.strftime('%d/%m %H:%M')}\n"
+                
+                embed.add_field(
+                    name="💾 Arquivos de Backup Locais",
+                    value=backup_info or "Nenhum arquivo encontrado",
+                    inline=False
+                )
+            
+            # Status do Git
+            try:
+                # Verificar status do repositório
+                git_status = subprocess.run(['git', 'status', '--porcelain'], 
+                                          capture_output=True, text=True, check=True)
+                
+                git_log = subprocess.run(['git', 'log', '-1', '--format=%h %s (%cr)'], 
+                                       capture_output=True, text=True, check=True)
+                
+                git_info = f"📝 Último commit: `{git_log.stdout.strip()}`\n"
+                if git_status.stdout.strip():
+                    git_info += f"⚠️ Alterações não commitadas: {len(git_status.stdout.strip().splitlines())} arquivos"
+                else:
+                    git_info += "✅ Repositório limpo"
+                
+                embed.add_field(
+                    name="🔄 Status do Git",
+                    value=git_info,
+                    inline=False
+                )
+                
+            except subprocess.CalledProcessError:
+                embed.add_field(
+                    name="🔄 Status do Git",
+                    value="❌ Erro ao acessar repositório Git",
+                    inline=False
+                )
+            
+            # Verificar último backup automático
+            last_backup_file = ".last_backup_time"
+            if Path(last_backup_file).exists():
+                try:
+                    with open(last_backup_file, 'r') as f:
+                        last_backup_str = f.read().strip()
+                    last_backup = datetime.fromisoformat(last_backup_str)
+                    time_since = datetime.now() - last_backup
+                    
+                    embed.add_field(
+                        name="🕐 Último Backup Automático",
+                        value=f"⏰ {time_since} atrás\n📅 {last_backup.strftime('%d/%m/%Y %H:%M:%S')}",
+                        inline=False
+                    )
+                except:
+                    embed.add_field(
+                        name="🕐 Último Backup Automático",
+                        value="⚠️ Erro ao ler timestamp",
+                        inline=False
+                    )
+            else:
+                embed.add_field(
+                    name="🕐 Último Backup Automático",
+                    value="❓ Nenhum backup automático registrado",
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="🛠️ Comandos Úteis",
+                value="`/fazer_backup` - Backup manual\n`/restaurar_backup arquivo:nome.json` - Restaurar backup\n`/listar_backups` - Ver arquivos disponíveis",
+                inline=False
+            )
+            
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro: {str(e)}")
+
+    @app_commands.command(name="listar_backups", description="[ADMIN] Lista todos os arquivos de backup disponíveis.")
+    @app_commands.default_permissions(administrator=True)
+    async def listar_backups(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            from pathlib import Path
+            from datetime import datetime
+            import json
+            
+            # Procurar arquivos de backup
+            backup_patterns = ["*backup*.json", "render_migration_backup.json*"]
+            all_backups = []
+            
+            for pattern in backup_patterns:
+                all_backups.extend(Path('.').glob(pattern))
+            
+            if not all_backups:
+                await interaction.followup.send("📭 Nenhum arquivo de backup encontrado!")
+                return
+            
+            # Ordenar por data de modificação (mais recentes primeiro)
+            all_backups.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            
+            embed = discord.Embed(
+                title="📋 Arquivos de Backup Disponíveis",
+                description=f"Encontrados **{len(all_backups)}** arquivos de backup",
+                color=discord.Color.blue()
+            )
+            
+            backup_list = ""
+            for i, backup_file in enumerate(all_backups[:10]):  # Mostrar apenas os 10 mais recentes
+                stat = backup_file.stat()
+                size_kb = stat.st_size / 1024
+                mod_time = datetime.fromtimestamp(stat.st_mtime)
+                
+                # Tentar ler informações do backup
+                try:
+                    with open(backup_file, 'r', encoding='utf-8') as f:
+                        backup_data = json.load(f)
+                    player_count = backup_data.get('total_players', 'N/A')
+                    backup_date = backup_data.get('backup_date', 'N/A')
+                    extra_info = f" - {player_count} jogadores"
+                except:
+                    extra_info = ""
+                
+                backup_list += f"📁 **`{backup_file.name}`**\n"
+                backup_list += f"   📊 {size_kb:.1f}KB • 🕐 {mod_time.strftime('%d/%m/%Y %H:%M')}{extra_info}\n\n"
+            
+            if len(all_backups) > 10:
+                backup_list += f"... e mais {len(all_backups) - 10} arquivos"
+            
+            embed.add_field(
+                name="📂 Arquivos (mais recentes primeiro)",
+                value=backup_list,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="💡 Como usar",
+                value="Para restaurar: `/restaurar_backup arquivo:nome_do_arquivo.json`",
+                inline=False
+            )
+            
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro: {str(e)}")
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(AdminCog(bot))
