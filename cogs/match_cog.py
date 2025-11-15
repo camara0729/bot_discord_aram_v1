@@ -192,6 +192,10 @@ class MatchCog(commands.Cog):
             
             await interaction.followup.send(embed=embed)
             print(f"📘 Partida registrada (match_id={match_id})")
+
+            badges = interaction.client.get_cog('BadgesCog')
+            if badges:
+                await badges.update_top_rank_badge(interaction.guild, notify=False)
             
         except Exception as e:
             print(f"Erro ao registrar partida: {e}")
@@ -380,6 +384,10 @@ class MatchCog(commands.Cog):
             
             # Limpar times salvos após usar
             clear_last_teams(interaction.guild.id)
+
+            badges = interaction.client.get_cog('BadgesCog')
+            if badges:
+                await badges.update_top_rank_badge(interaction.guild, notify=False)
             
         except Exception as e:
             print(f"Erro ao registrar resultado rápido: {e}")

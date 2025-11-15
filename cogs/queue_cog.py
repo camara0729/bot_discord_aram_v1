@@ -116,6 +116,8 @@ class QueueCog(commands.Cog):
             await interaction.followup.send("❌ Fila não encontrada ou já finalizada.", ephemeral=True)
             return
 
+        players = await db_manager.get_queue_players(queue['id'])
+        await self._cleanup_queue_badges(queue, players)
         await db_manager.update_queue_status(queue['id'], 'cancelada')
         await self._edit_queue_message(queue, "❌ Fila cancelada", discord.Color.red(), None)
         await interaction.followup.send(f"🛑 Fila `{nome}` cancelada.", ephemeral=True)
@@ -125,6 +127,13 @@ class QueueCog(commands.Cog):
         if not queue or queue['status'] != 'aberta':
             await interaction.response.send_message("❌ Esta fila não está mais ativa.", ephemeral=True)
             return
+
+        fairplay = self.bot.get_cog('FairPlayCog')
+        if fairplay:
+            msg = await fairplay.check_penalty(interaction.guild_id, interaction.user)
+            if msg:
+                await interaction.response.send_message(msg, ephemeral=True)
+                return
 
         player = await db_manager.get_player(interaction.user.id)
         if not player:
@@ -139,6 +148,10 @@ class QueueCog(commands.Cog):
         players = await db_manager.get_queue_players(queue_id)
         await self._update_queue_embed(queue, players, interaction)
         await interaction.response.send_message("✅ Você entrou na fila!", ephemeral=True)
+
+        badges = self.bot.get_cog('BadgesCog')
+        if badges:
+            await badges.assign_queue_badge(interaction.user)
 
         if len(players) >= queue['slots']:
             await db_manager.update_queue_status(queue_id, 'montando')
@@ -158,6 +171,10 @@ class QueueCog(commands.Cog):
         players = await db_manager.get_queue_players(queue_id)
         await self._update_queue_embed(queue, players, interaction)
         await interaction.response.send_message("🚪 Você saiu da fila.", ephemeral=True)
+
+        badges = self.bot.get_cog('BadgesCog')
+        if badges:
+            await badges.assign_queue_badge(interaction.user, remove=True)
 
     async def _build_queue_embed(self, queue: dict, players: List[int]):
         embed = discord.Embed(
@@ -273,6 +290,8 @@ class QueueCog(commands.Cog):
             [player['user'].id for player in red_team]
         )
 
+        await self._cleanup_queue_badges(queue, players)
+
         await db_manager.update_queue_status(queue['id'], 'concluida')
         await db_manager.increment_metadata_counter('queues_completed')
         await self._edit_queue_message(queue, "✅ Fila concluída! Times montados no canal.", discord.Color.dark_green(), None)
@@ -296,6 +315,16 @@ class QueueCog(commands.Cog):
             return
         embed = discord.Embed(title=f"Fila: {queue['name']}", description=status_text, color=color)
         await message.edit(embed=embed, view=view)
+
+    async def _cleanup_queue_badges(self, queue: dict, players: List[int]):
+        badges = self.bot.get_cog('BadgesCog')
+        guild = self.bot.get_guild(queue['guild_id'])
+        if not badges or not guild:
+            return
+        for player_id in players:
+            member = guild.get_member(player_id)
+            if member:
+                await badges.assign_queue_badge(member, remove=True)
 
 class QueueView(discord.ui.View):
     def __init__(self, cog: QueueCog, queue_id: int):

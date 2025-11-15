@@ -168,6 +168,30 @@ class DatabaseManager:
                 )
             ''')
 
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS badge_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    badge_type TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    criteria_value TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(guild_id, badge_type)
+                )
+            ''')
+
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS badge_assignments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    discord_id INTEGER NOT NULL,
+                    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(guild_id, role_id, discord_id)
+                )
+            ''')
+
             # Garantir colunas extras após upgrades
             async with db.execute("PRAGMA table_info(matches)") as cursor:
                 columns = await cursor.fetchall()
@@ -606,6 +630,56 @@ class DatabaseManager:
                 ''', (penalty['id'],))
                 await db.commit()
             return None
+
+    async def upsert_badge_config(self, guild_id: int, badge_type: str, name: str, role_id: int, criteria_value: Optional[str]) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                INSERT INTO badge_configs (guild_id, badge_type, name, role_id, criteria_value)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, badge_type)
+                DO UPDATE SET name = excluded.name, role_id = excluded.role_id, criteria_value = excluded.criteria_value
+            ''', (guild_id, badge_type, name, role_id, criteria_value))
+            await db.commit()
+
+    async def get_badge_configs(self, guild_id: int) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute('SELECT * FROM badge_configs WHERE guild_id = ?', (guild_id,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_badge_config(self, guild_id: int, badge_type: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute('SELECT * FROM badge_configs WHERE guild_id = ? AND badge_type = ?', (guild_id, badge_type)) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def record_badge_assignment(self, guild_id: int, role_id: int, discord_id: int) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                INSERT INTO badge_assignments (guild_id, role_id, discord_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, role_id, discord_id) DO NOTHING
+            ''', (guild_id, role_id, discord_id))
+            await db.commit()
+
+    async def remove_badge_assignment(self, guild_id: int, role_id: int, discord_id: int) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                DELETE FROM badge_assignments
+                WHERE guild_id = ? AND role_id = ? AND discord_id = ?
+            ''', (guild_id, role_id, discord_id))
+            await db.commit()
+
+    async def list_badge_holders(self, guild_id: int, role_id: int) -> List[int]:
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute('''
+                SELECT discord_id FROM badge_assignments
+                WHERE guild_id = ? AND role_id = ?
+            ''', (guild_id, role_id)) as cursor:
+                rows = await cursor.fetchall()
+                return [row[0] for row in rows]
 
     async def bulk_reset_player_stats(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:

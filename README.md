@@ -16,6 +16,7 @@
 ## Permissões
 - Comandos `/fila criar` e `/fila cancelar` exigem permissão de administrador na guild (verificado antes de criar a fila).
 - O bot precisa de permissão para enviar mensagens e usar componentes no canal configurado.
+- Para badges automáticas e distribuição de roles, o bot precisa de **Manage Roles** e sua role deve estar acima das roles de badge.
 
 ## Variáveis de ambiente relevantes
 - `DISCORD_TOKEN`
