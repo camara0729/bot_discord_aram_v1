@@ -1,151 +1,44 @@
-# Sistema de Backup Git para Render Free Tier
+# Sistema de Backup para Render Free Tier
 
-## Problema Resolvido
+O armazenamento local do Render é efêmero, mas agora usamos dois mecanismos complementares:
 
-O Render Free Tier não possui armazenamento persistente em disco, fazendo com que o banco de dados SQLite seja perdido a cada deploy. Este sistema resolve isso automaticamente usando o Git como mecanismo de backup/restore.
+1. **Banco em disco persistente** – `DATABASE_PATH=/app/data/bot_database.db` fica em um volume que sobrevive a deploys/restarts.
+2. **Backup remoto automático** – os dados são exportados periodicamente para um webhook (Discord, Supabase Storage ou qualquer endpoint HTTP compatível).
 
 ## Como Funciona
 
-### 1. Backup Automático
-- **Frequência**: A cada 6 horas (configurável via `BACKUP_FREQUENCY_HOURS`)
-- **Trigger**: Executado junto com o keep-alive ping (a cada 10 minutos, mas só faz backup quando necessário)
-- **Processo**:
-  1. Verifica se há dados novos no banco
-  2. Cria backup em JSON (`auto_backup_render.json`)
-  3. Faz commit e push automático para o Git
-  4. Registra timestamp do último backup
+### 1. Disco Persistente
+- Configure `DATABASE_PATH=/app/data/bot_database.db` (já definido em `render.yaml`).
+- O arquivo do banco fica no volume `bot-data`, evitando perda em redeploys.
 
-### 2. Restore Automático
-- **Trigger**: No startup do bot
-- **Processo**:
-  1. Verifica se o banco está vazio
-  2. Procura por arquivos de backup disponíveis
-  3. Restaura automaticamente os dados
-  4. Preserva histórico de jogadores e ranking
+### 2. Backup Automático via Webhook
+- Variável obrigatória: `BACKUP_WEBHOOK_URL` (ex.: webhook privado do Discord).
+- Job `periodic_backup_task` roda a cada hora e, se o último backup tiver mais de `BACKUP_FREQUENCY_HOURS` (default 6), cria um JSON via `backup_restore_db.py` e envia para o webhook.
+- Após envio bem-sucedido, a data do backup é registrada em `.last_backup_time`.
 
-### 3. Comandos Manuais de Administração
+### 3. Comandos Manuais
+- `/fazer_backup`: força a criação do arquivo JSON e o envio para o webhook.
+- `/listar_backups`: lista arquivos `.json` presentes no repositório/volume (útil para inspeções).
+- `/restaurar_backup` e `/confirmar_restore`: restauram qualquer arquivo local (inclusive backups baixados do webhook e enviados de volta para o servidor).
 
-#### `/fazer_backup`
-- Cria backup manual imediato
-- Envia automaticamente para Git
-- Útil antes de alterações importantes
+## Fluxo de Recuperação
+1. Baixe o arquivo JSON do canal/webhook.
+2. Faça upload para o repositório (ou para o volume montado no Render).
+3. Execute `/restaurar_backup arquivo:nome.json` ou deixe o arquivo como `render_migration_backup.json` para restauração automática no próximo deploy.
 
-#### `/restaurar_backup arquivo:nome.json`
-- Restaura dados de backup específico
-- Pede confirmação se há dados existentes
-- Seguro contra perda acidental
+## Monitoramento
+- `/status_backup` mostra:
+  - Se o webhook está configurado.
+  - Caminho atual do banco (`DATABASE_PATH`).
+  - Último backup automático registrado.
+  - Principais arquivos `.json` existentes.
+- Logs do Render exibem mensagens `📤 Preparando backup remoto...` e `✅ Backup enviado...` confirmando a rotina.
 
-#### `/confirmar_restore arquivo:nome.json`
-- Confirma restauração (substitui todos os dados)
-- Usado após `/restaurar_backup` quando há dados existentes
+## Variáveis Relevantes
+| Variável | Descrição |
+|----------|-----------|
+| `DATABASE_PATH` | Caminho absoluto do arquivo SQLite (ex.: `/app/data/bot_database.db`). |
+| `BACKUP_WEBHOOK_URL` | URL usada para receber os backups JSON. |
+| `BACKUP_FREQUENCY_HOURS` | Intervalo mínimo entre backups automáticos (padrão 6h). |
 
-#### `/status_backup`
-- Mostra status completo do sistema
-- Lista arquivos de backup disponíveis
-- Informações do último backup automático
-- Status do repositório Git
-
-#### `/listar_backups`
-- Lista todos os arquivos de backup
-- Mostra tamanhos, datas e número de jogadores
-- Ordenados por data (mais recentes primeiro)
-
-## Configuração no Render
-
-### 1. Variáveis de Ambiente
-```bash
-DISCORD_TOKEN=seu_token_discord
-RIOT_API_KEY=sua_chave_riot_api
-RENDER_EXTERNAL_URL=https://seu-app.onrender.com
-BACKUP_FREQUENCY_HOURS=6
-```
-
-### 2. Deploy Command
-No Render, usar como build command:
-```bash
-pip install -r requirements.txt
-```
-
-E como start command:
-```bash
-python main.py
-```
-
-### 3. Git Configuration
-O sistema configura automaticamente:
-- `user.email`: "render-bot@noreply.com" (automático) ou "admin-bot@noreply.com" (manual)  
-- `user.name`: "Render Auto Backup" (automático) ou "Admin Manual Backup" (manual)
-
-## Arquivos de Backup
-
-### Tipos de Arquivo
-- `auto_backup_render.json`: Backups automáticos
-- `manual_backup_YYYYMMDD_HHMMSS.json`: Backups manuais
-- `render_migration_backup.json`: Backup de migração inicial (legado)
-
-### Estrutura do Backup
-```json
-{
-  "backup_date": "2024-01-01T12:00:00",
-  "version": "1.0",
-  "total_players": 25,
-  "total_matches": 150,
-  "data": {
-    "players": [...],
-    "matches": [...],
-    "match_participants": [...]
-  }
-}
-```
-
-## Fluxo de Deploy
-
-1. **Novo Deploy**:
-   - Sistema inicia → `restore_from_git_backup()`
-   - Verifica se banco está vazio
-   - Se vazio, procura backup mais recente
-   - Restaura dados automaticamente
-
-2. **Durante Execução**:
-   - Keep-alive a cada 10 minutos
-   - Backup automático a cada 6 horas (se houver dados novos)
-   - Commit e push automático para Git
-
-3. **Administração**:
-   - Admins podem fazer backup manual
-   - Possibilidade de restaurar backups específicos
-   - Monitoramento via `/status_backup`
-
-## Vantagens
-
-✅ **Zero configuração**: Funciona automaticamente no primeiro deploy  
-✅ **Persistência garantida**: Dados nunca são perdidos  
-✅ **Backup incremental**: Só faz backup quando há dados novos  
-✅ **Controle manual**: Comandos admin para situações especiais  
-✅ **Monitoramento**: Status completo do sistema  
-✅ **Segurança**: Confirmações antes de substituir dados  
-✅ **Histórico**: Múltiplos backups preservados  
-
-## Solução de Problemas
-
-### Backup não está funcionando
-1. Verificar `/status_backup`
-2. Confirmar variáveis de ambiente
-3. Verificar logs do Render
-
-### Dados não foram restaurados no deploy
-1. Verificar se existe arquivo de backup no repositório
-2. Executar `/listar_backups` para ver arquivos
-3. Usar `/restaurar_backup` manualmente se necessário
-
-### Git push falha
-- Backups locais ainda são criados
-- Sistema continua funcionando
-- Verificar permissões do repositório no Render
-
-## Importante
-
-⚠️ **Render Free Tier**: Este sistema é especificamente para o free tier sem persistent disk  
-⚠️ **Git como Storage**: O repositório Git funciona como storage de backup  
-⚠️ **Automatic**: Funciona sem intervenção manual, mas comandos admin estão disponíveis  
-⚠️ **Safe**: Sempre pede confirmação antes de substituir dados existentes  
+Com esses ajustes, o bot mantém os dados mesmo no plano gratuito e ainda exporta cópias off-site para recuperação rápida. 🚀

@@ -3,17 +3,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from typing import Optional, List, Dict, Any
-import json
-import os
 import re
 
 from utils.database_manager import db_manager
+from utils.last_team_store import load_last_teams, clear_last_teams
 import config
 
 class MatchCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.last_teams_file = "last_teams.json"
 
     @app_commands.command(name="registrar_partida", description="Registre o resultado de uma partida ARAM.")
     @app_commands.describe(
@@ -185,11 +183,8 @@ class MatchCog(commands.Cog):
         await interaction.response.defer()
         
         try:
-            # Importar TeamCog para acessar last_teams
-            from .team_cog import TeamCog
-            
-            # Verificar se há times salvos
-            if not TeamCog.last_teams:
+            last_teams = load_last_teams(interaction.guild_id)
+            if not last_teams:
                 embed = discord.Embed(
                     title="❌ Nenhum Time Encontrado",
                     description="Não há times recentes salvos. Use `/times` primeiro para gerar os times!",
@@ -197,42 +192,41 @@ class MatchCog(commands.Cog):
                 )
                 await interaction.followup.send(embed=embed)
                 return
-            
-            # Extrair times dos dados salvos
-            blue_team = [player['user'] for player in TeamCog.last_teams['blue']]
-            red_team = [player['user'] for player in TeamCog.last_teams['red']]
-            
-            # Verificar se todos estão registrados
-            all_players = blue_team + red_team
-            for player in all_players:
-                player_data = await db_manager.get_player(player.id)
+
+            blue_team_ids = last_teams.get('blue_team', [])
+            red_team_ids = last_teams.get('red_team', [])
+            if not blue_team_ids or not red_team_ids:
+                await interaction.followup.send("❌ Arquivo de times recente está incompleto. Gere novos times com `/times`.", ephemeral=True)
+                return
+
+            all_player_ids = blue_team_ids + red_team_ids
+            for player_id in all_player_ids:
+                player_data = await db_manager.get_player(player_id)
                 if not player_data:
-                    await interaction.followup.send(f"❌ {player.mention} não está registrado! Use `/registrar` primeiro.")
+                    await interaction.followup.send(f"❌ <@{player_id}> não está registrado! Use `/registrar` primeiro.")
                     return
-            
-            # Verificar MVP e Bagre
-            if mvp and mvp not in all_players:
+
+            if mvp and mvp.id not in all_player_ids:
                 await interaction.followup.send("❌ MVP deve estar em um dos times!")
                 return
-            
-            if bagre and bagre not in all_players:
+
+            if bagre and bagre.id not in all_player_ids:
                 await interaction.followup.send("❌ Bagre deve estar em um dos times!")
                 return
-            
-            # Determinar vencedores e perdedores
-            winners = blue_team if vencedor == "azul" else red_team
-            losers = red_team if vencedor == "azul" else blue_team
+
+            winners = blue_team_ids if vencedor == "azul" else red_team_ids
+            losers = red_team_ids if vencedor == "azul" else blue_team_ids
             
             # Atualizar estatísticas dos jogadores
             pdl_changes = {}
             
             # Processar vencedores
-            for player in winners:
-                is_mvp = (mvp and player.id == mvp.id)
-                is_bagre = (bagre and player.id == bagre.id)
+            for player_id in winners:
+                is_mvp = (mvp and player_id == mvp.id)
+                is_bagre = (bagre and player_id == bagre.id)
                 
                 await db_manager.update_player_stats(
-                    discord_id=player.id,
+                    discord_id=player_id,
                     won=True,
                     is_mvp=is_mvp,
                     is_bagre=is_bagre
@@ -245,15 +239,15 @@ class MatchCog(commands.Cog):
                 if is_bagre:
                     pdl_change += config.BAGRE_PENALTY
                 
-                pdl_changes[player.id] = pdl_change
+                pdl_changes[player_id] = pdl_change
             
             # Processar perdedores
-            for player in losers:
-                is_mvp = (mvp and player.id == mvp.id)
-                is_bagre = (bagre and player.id == bagre.id)
+            for player_id in losers:
+                is_mvp = (mvp and player_id == mvp.id)
+                is_bagre = (bagre and player_id == bagre.id)
                 
                 await db_manager.update_player_stats(
-                    discord_id=player.id,
+                    discord_id=player_id,
                     won=False,
                     is_mvp=is_mvp,
                     is_bagre=is_bagre
@@ -266,7 +260,7 @@ class MatchCog(commands.Cog):
                 if is_bagre:
                     pdl_change += config.BAGRE_PENALTY
                 
-                pdl_changes[player.id] = pdl_change
+                pdl_changes[player_id] = pdl_change
             
             # Criar embed de resultado
             embed = discord.Embed(
@@ -278,9 +272,9 @@ class MatchCog(commands.Cog):
             # Time vencedor
             winner_team_name = "🔵 Time Azul" if vencedor == "azul" else "🔴 Time Vermelho"
             winner_text = ""
-            for player in winners:
-                pdl_change = pdl_changes[player.id]
-                winner_text += f"• {player.mention} (**+{pdl_change}** PDL)\n"
+            for player_id in winners:
+                pdl_change = pdl_changes[player_id]
+                winner_text += f"• {self._mention_player(interaction.guild, player_id)} (**+{pdl_change}** PDL)\n"
             
             embed.add_field(
                 name=f"{winner_team_name} (Vencedor)",
@@ -291,10 +285,10 @@ class MatchCog(commands.Cog):
             # Time perdedor
             loser_team_name = "🔴 Time Vermelho" if vencedor == "azul" else "🔵 Time Azul"
             loser_text = ""
-            for player in losers:
-                pdl_change = pdl_changes[player.id]
+            for player_id in losers:
+                pdl_change = pdl_changes[player_id]
                 sign = "+" if pdl_change >= 0 else ""
-                loser_text += f"• {player.mention} (**{sign}{pdl_change}** PDL)\n"
+                loser_text += f"• {self._mention_player(interaction.guild, player_id)} (**{sign}{pdl_change}** PDL)\n"
             
             embed.add_field(
                 name=f"{loser_team_name} (Perdedor)",
@@ -317,7 +311,7 @@ class MatchCog(commands.Cog):
             await interaction.followup.send(embed=embed)
             
             # Limpar times salvos após usar
-            self._clear_last_teams(interaction.guild.id)
+            clear_last_teams(interaction.guild.id)
             
         except Exception as e:
             print(f"Erro ao registrar resultado rápido: {e}")
@@ -395,62 +389,11 @@ class MatchCog(commands.Cog):
         
         return unique_players
 
-    def _save_last_teams(self, guild_id: int, blue_team: List[int], red_team: List[int]):
-        """Salva os últimos times gerados para uso no resultado rápido."""
-        try:
-            data = {}
-            if os.path.exists(self.last_teams_file):
-                with open(self.last_teams_file, 'r') as f:
-                    data = json.load(f)
-            
-            data[str(guild_id)] = {
-                'blue_team': blue_team,
-                'red_team': red_team,
-                'timestamp': discord.utils.utcnow().isoformat()
-            }
-            
-            with open(self.last_teams_file, 'w') as f:
-                json.dump(data, f, indent=2)
-                
-            print(f"Times salvos para o guild {guild_id}")
-            
-        except Exception as e:
-            print(f"Erro ao salvar times: {e}")
-
-    def _load_last_teams(self, guild_id: int) -> Optional[Dict[str, Any]]:
-        """Carrega os últimos times salvos."""
-        try:
-            if not os.path.exists(self.last_teams_file):
-                return None
-                
-            with open(self.last_teams_file, 'r') as f:
-                data = json.load(f)
-            
-            return data.get(str(guild_id))
-            
-        except Exception as e:
-            print(f"Erro ao carregar times: {e}")
-            return None
-
-    def _clear_last_teams(self, guild_id: int):
-        """Remove os times salvos após usar."""
-        try:
-            if not os.path.exists(self.last_teams_file):
-                return
-                
-            with open(self.last_teams_file, 'r') as f:
-                data = json.load(f)
-            
-            if str(guild_id) in data:
-                del data[str(guild_id)]
-                
-                with open(self.last_teams_file, 'w') as f:
-                    json.dump(data, f, indent=2)
-                    
-                print(f"Times limpos para o guild {guild_id}")
-                
-        except Exception as e:
-            print(f"Erro ao limpar times: {e}")
+    def _mention_player(self, guild: discord.Guild, player_id: int) -> str:
+        member = guild.get_member(player_id) if guild else None
+        if member:
+            return member.mention
+        return f"<@{player_id}>"
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(MatchCog(bot))

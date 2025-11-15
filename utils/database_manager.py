@@ -1,12 +1,14 @@
 # utils/database_manager.py
 import aiosqlite
 import os
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 import config
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "bot_database.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or os.getenv('DATABASE_PATH', 'bot_database.db')
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
     async def initialize_database(self):
         """Inicializa o banco de dados e cria as tabelas necessárias."""
@@ -83,9 +85,14 @@ class DatabaseManager:
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute('''
-                    INSERT OR REPLACE INTO players 
+                    INSERT INTO players 
                     (discord_id, riot_id, puuid, lol_rank, username, pdl, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(discord_id) DO UPDATE SET
+                        riot_id = excluded.riot_id,
+                        lol_rank = excluded.lol_rank,
+                        username = excluded.username,
+                        updated_at = CURRENT_TIMESTAMP
                 ''', (discord_id, riot_id, puuid, lol_rank, username, config.DEFAULT_PDL))
                 await db.commit()
                 print(f"Jogador {riot_id} adicionado/atualizado com sucesso!")

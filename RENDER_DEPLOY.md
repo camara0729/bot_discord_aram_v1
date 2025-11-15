@@ -1,147 +1,59 @@
-# Deploy Guide - Render Free Tier
+# Deploy Guide - Render Free Tier (Worker)
 
 ## Pré-requisitos
-1. Conta no GitHub com repositório do bot
-2. Conta no Render (gratuita)
-3. Discord Bot Token
-4. Riot API Key
+1. Repositório GitHub com o bot.
+2. Conta no Render (plano gratuito).
+3. Discord Bot Token e Riot API Key.
+4. Webhook privado (Discord ou outro endpoint HTTP) para receber backups.
 
 ## Passo a Passo
 
 ### 1. Preparar Repositório
-```bash
-# Adicionar sistema de backup ao Git
-git add .
-git commit -m "Add Git backup system for Render free tier"
-git push origin main
-```
+Certifique-se de que o código mais recente está no GitHub.
 
-### 2. Configurar Render
-1. Acesse [render.com](https://render.com)
-2. Conecte sua conta GitHub
-3. Clique em "New +" → "Web Service"
-4. Selecione seu repositório
-5. Configure:
-   - **Name**: `bot-discord-aram` (ou nome desejado)
+### 2. Configurar Worker no Render
+1. Acesse [render.com](https://render.com).
+2. Clique em **New +** → **Worker**.
+3. Selecione o repositório do bot.
+4. Configure:
    - **Environment**: `Python 3`
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `python main.py`
    - **Plan**: `Free`
 
 ### 3. Variáveis de Ambiente
-No painel do Render, adicionar em "Environment":
+| Variável | Descrição | Obrigatório |
+|----------|-----------|-------------|
+| `DISCORD_TOKEN` | Token do bot do Discord | ✅ |
+| `RIOT_API_KEY` | Chave da Riot | ✅ |
+| `DATABASE_PATH` | Caminho do SQLite (use `/app/data/bot_database.db`) | ✅ |
+| `BACKUP_WEBHOOK_URL` | Webhook para receber backups JSON | ✅ |
+| `BACKUP_FREQUENCY_HOURS` | Intervalo entre backups automáticos (padrão 6) | ❌ |
 
-| Variável | Valor | Obrigatório |
-|----------|-------|-------------|
-| `DISCORD_TOKEN` | `seu_bot_token_aqui` | ✅ |
-| `RIOT_API_KEY` | `sua_riot_api_key_aqui` | ✅ |
-| `RENDER_EXTERNAL_URL` | `https://seu-app-nome.onrender.com` | ⚠️ Preencher após deploy |
-| `BACKUP_FREQUENCY_HOURS` | `6` | ❌ Opcional |
+O `render.yaml` já define o volume persistente `bot-data` montado em `/app/data`.
 
 ### 4. Deploy Inicial
-1. Clique em "Deploy"
-2. Aguarde build completar (3-5 minutos)
-3. Bot iniciará automaticamente
-4. Logs mostrarão: `📋 Nenhum backup de migração encontrado` (normal para primeiro deploy)
+1. Clique em **Create Worker**.
+2. Aguarde a instalação e o start.
+3. Verifique nos logs:
+   - `🤖 Bot ... está online!`
+   - `💾 Rotina de backup remoto iniciada`
 
-### 5. Configurar URL Externa
-1. Após deploy, copiar URL do serviço (ex: `https://seu-bot-nome.onrender.com`)
-2. Adicionar em Environment Variables como `RENDER_EXTERNAL_URL`
-3. Redeploy para aplicar
-
-### 6. Migrar Dados Existentes (se houver)
-Se você tem dados existentes para migrar:
-
-1. **Localmente**:
-   ```bash
-   python backup_restore_db.py
-   # Escolha opção de criar backup
-   ```
-
-2. **Renomear arquivo**:
-   ```bash
-   mv backup_database_*.json render_migration_backup.json
-   ```
-
-3. **Commitar**:
-   ```bash
-   git add render_migration_backup.json
-   git commit -m "Add migration backup for Render deploy"
-   git push origin main
-   ```
-
-4. **Redeploy no Render**:
-   - Vai detectar e restaurar automaticamente
-
-## Verificação
-
-### 1. Logs do Deploy
-Procurar por mensagens:
-```
-✅ Migração automática concluída!  # Se houve dados para migrar
-🚀 Sistema keep-alive iniciado      # Sistema funcionando
-🌐 Servidor web iniciado na porta 10000
-```
-
-### 2. Testar Bot
-```
-/ping              # Verificar se responde
-/leaderboard       # Ver se dados foram restaurados (se aplicável)
-/status_backup     # Verificar sistema de backup (admin)
-```
-
-### 3. Verificar Backup Automático
-- Aguardar ~10 minutos
-- Verificar logs: `✅ Keep-alive ping successful`
-- Após 6 horas com dados: backup automático será criado
-
-## Troubleshooting
-
-### Bot não inicia
-- ✅ Verificar `DISCORD_TOKEN` está correto
-- ✅ Verificar `requirements.txt` tem todas as dependências
-- ✅ Ver logs completos no Render
-
-### Keep-alive não funciona  
-- ✅ Configurar `RENDER_EXTERNAL_URL` corretamente
-- ✅ Verificar se URL está acessível publicamente
-
-### Backup não funciona
-- ✅ Verificar se há dados no banco (`/leaderboard`)
-- ✅ Usar `/fazer_backup` manual para testar
-- ✅ Verificar `/status_backup` para diagnóstico
-
-### Dados perdidos no redeploy
-- ✅ Verificar se backup existe no repositório Git
-- ✅ Usar `/restaurar_backup` manual se necessário
-- ✅ Verificar logs de startup para erros
+### 5. Migração de Dados (opcional)
+- Coloque um arquivo `render_migration_backup.json` no repositório com o dump desejado.
+- O `main.py` detecta banco vazio e restaura automaticamente esse arquivo apenas uma vez.
 
 ## Monitoramento
+- Use `/status_backup` para confirmar webhook, caminho do banco e horário do último backup.
+- Logs do Render mostram cada envio automático de backup.
+- Como Worker, não há endpoints HTTP – monitore a presença do bot diretamente pelo Discord.
 
-### Comandos Úteis (Admin)
-- `/status_backup` - Status completo do sistema
-- `/fazer_backup` - Backup manual imediato  
-- `/listar_backups` - Ver todos os backups
-- `/restaurar_backup` - Restaurar backup específico
+## Recuperação
+1. Baixe o backup JSON do webhook (ex.: canal privado no Discord).
+2. Faça upload do arquivo para o repositório/volume.
+3. Use `/restaurar_backup arquivo:seuarquivo.json` ou deixe o arquivo como `render_migration_backup.json` para restauração automática.
 
-### Logs Importantes
-```bash
-# Sucesso no keep-alive
-✅ Keep-alive ping successful - 14:30:25
-
-# Backup automático criado
-✅ Backup enviado para Git com sucesso!
-
-# Restore no startup
-🔄 Restaurando dados do backup Git...
-✅ Dados restaurados do backup Git!
-```
-
-## Custos
-- **Render Free Tier**: Gratuito
-- **Limitações**: 
-  - 750 horas/mês (suficiente para uso pessoal)
-  - Hibernação após inatividade (resolvido com keep-alive)
-  - Sem persistent disk (resolvido com Git backup)
-
-🎉 **Pronto!** Seu bot agora está executando no Render com backup automático funcionando!
+## Dicas
+- Mantenha o `DATABASE_PATH` apontando para o volume persistente para evitar perdas inesperadas.
+- Para maior confiabilidade, gere backups manuais antes de grandes alterações usando `/fazer_backup`.
+- Caso precise migrar para outra plataforma (Railway, Fly.io, etc.), basta reutilizar o Dockerfile e as mesmas variáveis.

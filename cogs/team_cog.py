@@ -6,17 +6,16 @@ from typing import List, Dict, Any
 import random
 
 from utils.database_manager import db_manager
+from utils.last_team_store import save_last_teams
 import config
 
 class TeamCog(commands.Cog):
-    last_teams = None  # Variável de classe para armazenar últimos times
-    
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     @app_commands.command(name="times", description="Gere times balanceados para uma partida ARAM.")
     @app_commands.describe(participantes="Número de participantes (4, 6, 8 ou 10)")
-    @commands.cooldown(1, 10, commands.BucketType.guild)
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     async def times(self, interaction: discord.Interaction, participantes: int):
         # Validar número de participantes
         if participantes not in [4, 6, 8, 10]:
@@ -31,13 +30,13 @@ class TeamCog(commands.Cog):
         )
         
         # Criar view com botão de participar
-        view = ParticipantSelectionView(participantes, interaction.user)
+        view = ParticipantSelectionView(participantes, interaction.user, interaction.guild.id)
         await interaction.response.send_message(embed=embed, view=view)
 
     # Alias para compatibilidade: muitos usuários usam /time
     @app_commands.command(name="time", description="(Alias de /times) Gere times balanceados para uma partida ARAM.")
     @app_commands.describe(participantes="Número de participantes (4, 6, 8 ou 10)")
-    @commands.cooldown(1, 10, commands.BucketType.guild)
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     async def time(self, interaction: discord.Interaction, participantes: int):
         await self.times(interaction, participantes)
     
@@ -139,6 +138,9 @@ class TeamCog(commands.Cog):
                 inline=False
             )
             
+            guild_id = interaction.guild_id
+            save_last_teams(guild_id, [player['user'].id for player in blue_team], [player['user'].id for player in red_team])
+            
             # View com botões
             view = TeamActionsView(blue_team, red_team)
             await interaction.followup.send(embed=embed, view=view)
@@ -193,156 +195,41 @@ class TeamCog(commands.Cog):
         return unique_players
 
     def _balance_teams(self, players_data: List[Dict]) -> tuple:
-        """Gera times balanceados usando algoritmo otimizado."""
-        # Ordenar por força (balance_score)
-        sorted_players = sorted(players_data, key=lambda x: x['balance_score'], reverse=True)
-        
-        team_size = len(sorted_players) // 2
-        
-        # Para 4 jogadores, usar força bruta para encontrar o melhor balanceamento
-        if len(sorted_players) == 4:
-            return self._balance_teams_4_players(sorted_players)
-        
-        # Para mais jogadores, usar algoritmo otimizado
-        return self._balance_teams_optimized(sorted_players, team_size)
-
-    def _optimize_teams(self, players: List[Dict], team_size: int) -> tuple:
-        """Otimiza o balanceamento tentando diferentes combinações."""
+        """Gera times balanceados buscando todas as combinações possíveis."""
         from itertools import combinations
-        
+
+        total_players = len(players_data)
+        team_size = total_players // 2
+
+        if total_players < 2 or total_players % 2 != 0:
+            return players_data[:team_size], players_data[team_size:]
+
+        scores = [p['balance_score'] for p in players_data]
+        total_strength = sum(scores)
+
+        best_blue = []
+        best_red = []
         best_difference = float('inf')
-        best_blue = None
-        best_red = None
-        
-        # Limitar tentativas para performance
-        max_attempts = min(1000, len(list(combinations(range(len(players)), team_size))))
-        attempts = 0
-        
-        for blue_indices in combinations(range(len(players)), team_size):
-            if attempts >= max_attempts:
-                break
-            attempts += 1
-            
-            red_indices = [i for i in range(len(players)) if i not in blue_indices]
-            
-            blue_team = [players[i] for i in blue_indices]
-            red_team = [players[i] for i in red_indices]
-            
-            blue_strength = sum(p['balance_score'] for p in blue_team)
-            red_strength = sum(p['balance_score'] for p in red_team)
-            
+
+        for combo in combinations(range(total_players), team_size):
+            if 0 not in combo:  # evita combinações duplicadas (inversão Azul/Vermelho)
+                continue
+
+            blue_team = [players_data[i] for i in combo]
+            red_team = [players_data[i] for i in range(total_players) if i not in combo]
+
+            blue_strength = sum(scores[i] for i in combo)
+            red_strength = total_strength - blue_strength
             difference = abs(blue_strength - red_strength)
-            
+
             if difference < best_difference:
                 best_difference = difference
                 best_blue = blue_team
                 best_red = red_team
-                
-                # Se encontrou balanceamento perfeito, parar
-                if difference < 2:
+
+                if difference == 0:
                     break
-        
-        return best_blue, best_red
 
-    def _balance_teams_4_players(self, players: List[Dict]) -> tuple:
-        """Balanceamento otimizado específico para 4 jogadores usando força bruta."""
-        from itertools import combinations
-        
-        best_difference = float('inf')
-        best_blue = None
-        best_red = None
-        
-        print(f"🧮 Analisando {len(list(combinations(range(4), 2)))} combinações para 4 jogadores:")
-        
-        # Para 4 jogadores, existem apenas 3 combinações possíveis de 2x2
-        combination_num = 1
-        for blue_indices in combinations(range(4), 2):
-            red_indices = [i for i in range(4) if i not in blue_indices]
-            
-            blue_team = [players[i] for i in blue_indices]
-            red_team = [players[i] for i in red_indices]
-            
-            blue_strength = sum(p['balance_score'] for p in blue_team)
-            red_strength = sum(p['balance_score'] for p in red_team)
-            difference = abs(blue_strength - red_strength)
-            
-            blue_names = " + ".join([p['user'].display_name for p in blue_team])
-            red_names = " + ".join([p['user'].display_name for p in red_team])
-            
-            print(f"   Opção {combination_num}: [{blue_names}] vs [{red_names}]")
-            print(f"   Força: {blue_strength:.2f} vs {red_strength:.2f} | Diferença: {difference:.2f}")
-            
-            if difference < best_difference:
-                best_difference = difference
-                best_blue = blue_team
-                best_red = red_team
-            
-            combination_num += 1
-        
-        print(f"✅ Melhor combinação encontrada com diferença de {best_difference:.2f}")
-        return best_blue, best_red
-
-    def _balance_teams_optimized(self, players: List[Dict], team_size: int) -> tuple:
-        """Algoritmo de balanceamento otimizado para mais de 4 jogadores."""
-        # Algoritmo greedy melhorado
-        blue_team = []
-        red_team = []
-        blue_strength = 0
-        red_strength = 0
-        
-        # Adicionar jogadores um por vez, sempre no time mais fraco
-        for player in players:
-            if len(blue_team) == team_size:
-                red_team.append(player)
-                red_strength += player['balance_score']
-            elif len(red_team) == team_size:
-                blue_team.append(player)
-                blue_strength += player['balance_score']
-            else:
-                # Adicionar no time mais fraco
-                if blue_strength <= red_strength:
-                    blue_team.append(player)
-                    blue_strength += player['balance_score']
-                else:
-                    red_team.append(player)
-                    red_strength += player['balance_score']
-        
-        # Tentar otimização por troca se a diferença for muito grande
-        if abs(blue_strength - red_strength) > 5 and len(players) <= 10:
-            optimized_blue, optimized_red = self._try_swaps_optimization(blue_team, red_team)
-            if optimized_blue and optimized_red:
-                blue_team, red_team = optimized_blue, optimized_red
-        
-        return blue_team, red_team
-
-    def _try_swaps_optimization(self, blue_team: List[Dict], red_team: List[Dict]) -> tuple:
-        """Tenta melhorar o balanceamento trocando jogadores entre times."""
-        best_blue = blue_team.copy()
-        best_red = red_team.copy()
-        
-        current_blue_strength = sum(p['balance_score'] for p in blue_team)
-        current_red_strength = sum(p['balance_score'] for p in red_team)
-        best_difference = abs(current_blue_strength - current_red_strength)
-        
-        # Tentar todas as trocas possíveis (1 por 1)
-        for i, blue_player in enumerate(blue_team):
-            for j, red_player in enumerate(red_team):
-                # Calcular nova força após troca
-                new_blue_strength = current_blue_strength - blue_player['balance_score'] + red_player['balance_score']
-                new_red_strength = current_red_strength - red_player['balance_score'] + blue_player['balance_score']
-                new_difference = abs(new_blue_strength - new_red_strength)
-                
-                if new_difference < best_difference:
-                    # Aplicar troca
-                    new_blue = blue_team.copy()
-                    new_red = red_team.copy()
-                    new_blue[i] = red_player
-                    new_red[j] = blue_player
-                    
-                    best_blue = new_blue
-                    best_red = new_red
-                    best_difference = new_difference
-        
         return best_blue, best_red
 
     def _get_balance_quality(self, difference: float) -> Dict[str, str]:
@@ -393,11 +280,12 @@ class TeamActionsView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=None)
 
 class ParticipantSelectionView(discord.ui.View):
-    def __init__(self, max_participants: int, creator: discord.Member):
+    def __init__(self, max_participants: int, creator: discord.Member, guild_id: int):
         super().__init__(timeout=300)  # 5 minutos de timeout
         self.max_participants = max_participants
         self.creator = creator
         self.participants = []
+        self.guild_id = guild_id
         
     @discord.ui.button(label="🎮 Entrar na Partida", style=discord.ButtonStyle.primary, emoji="🎮")
     async def join_match(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -486,69 +374,61 @@ class ParticipantSelectionView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
     
     async def balance_teams(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
         try:
-            # Não usar followup.edit_message; edite diretamente a mensagem do componente
-            
-            # Buscar dados dos jogadores
             players_data = []
             for player in self.participants:
                 player_data = await db_manager.get_player(player.id)
                 if not player_data:
                     await interaction.followup.send(f"❌ {player.mention} não está registrado!", ephemeral=True)
                     return
-                    
+
                 balance_score = config.calculate_balance_score(
                     player_data['pdl'],
                     player_data.get('lol_rank', 'PRATA II'),
                     player_data['wins'],
                     player_data['losses']
                 )
-                
+
                 players_data.append({
                     'user': player,
                     'data': player_data,
                     'balance_score': balance_score
                 })
-            
-            # Gerar teams usando o método existente
+
             team_cog = interaction.client.get_cog('TeamCog')
             if not team_cog:
                 await interaction.followup.send("❌ Erro interno: TeamCog não encontrado", ephemeral=True)
                 return
-                
+
             blue_team, red_team = team_cog._balance_teams(players_data)
-            
-            # Calcular diferença de força
+
             blue_avg = sum(p['balance_score'] for p in blue_team) / len(blue_team)
             red_avg = sum(p['balance_score'] for p in red_team) / len(red_team)
             difference = abs(blue_avg - red_avg)
-            
-            # Criar embed final
+
             embed = discord.Embed(
                 title="⚔️ Times Balanceados",
                 description=f"Partida ARAM - {len(self.participants)} jogadores",
                 color=discord.Color.green()
             )
-            
-            # Time Azul
+
             blue_text = ""
             for i, player in enumerate(blue_team, 1):
                 elo_info = config.get_elo_by_pdl(player['data']['pdl'])
                 blue_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\\n"
                 blue_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\\n"
-            
+
             embed.add_field(name="🔵 Time Azul", value=blue_text, inline=True)
-            
-            # Time Vermelho  
+
             red_text = ""
             for i, player in enumerate(red_team, 1):
                 elo_info = config.get_elo_by_pdl(player['data']['pdl'])
                 red_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\\n"
                 red_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\\n"
-            
+
             embed.add_field(name="🔴 Time Vermelho", value=red_text, inline=True)
-            
-            # Estatísticas
+
             balance_quality = team_cog._get_balance_quality(difference)
             embed.add_field(
                 name="📊 Estatísticas",
@@ -558,12 +438,12 @@ class ParticipantSelectionView(discord.ui.View):
                       f"**Qualidade:** {balance_quality['emoji']} {balance_quality['text']}",
                 inline=False
             )
-            
-            # View com ações finais
-            final_view = BalancedTeamsView(blue_team, red_team, self.participants)
-            # Edita a mensagem original do painel de participantes
-            await interaction.message.edit(embed=embed, view=final_view)
-            
+
+            guild_id = interaction.guild_id or self.guild_id
+            save_last_teams(guild_id, [player['user'].id for player in blue_team], [player['user'].id for player in red_team])
+            final_view = BalancedTeamsView(blue_team, red_team, self.participants, guild_id)
+            await interaction.edit_original_response(embed=embed, view=final_view)
+
         except Exception as e:
             await interaction.followup.send(f"❌ Erro ao balancear times: {str(e)}", ephemeral=True)
             
@@ -582,23 +462,17 @@ class ParticipantSelectionView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=None)
 
 class BalancedTeamsView(discord.ui.View):
-    def __init__(self, blue_team, red_team, all_participants):
+    def __init__(self, blue_team, red_team, all_participants, guild_id: int):
         super().__init__(timeout=1800)  # 30 minutos
         self.blue_team = blue_team
         self.red_team = red_team
         self.all_participants = all_participants
-        
-        # Armazenar globalmente para resultado rápido
-        TeamCog.last_teams = {
-            'blue': blue_team,
-            'red': red_team,
-            'participants': all_participants
-        }
+        self.guild_id = guild_id
     
     @discord.ui.button(label="🔄 Rebalancear", style=discord.ButtonStyle.secondary)
     async def rebalance(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Mesmo código de balanceamento, mas reorganiza os times
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
         
         try:
             # Usar algoritmo diferente ou embaralhar
@@ -619,11 +493,7 @@ class BalancedTeamsView(discord.ui.View):
             # Atualizar times
             self.blue_team = new_blue
             self.red_team = new_red
-            TeamCog.last_teams = {
-                'blue': new_blue,
-                'red': new_red,
-                'participants': self.all_participants
-            }
+            save_last_teams(self.guild_id, [player['user'].id for player in new_blue], [player['user'].id for player in new_red])
             
             # Recalcular e atualizar embed (código similar ao balance_teams)
             blue_avg = sum(p['balance_score'] for p in new_blue) / len(new_blue)
@@ -663,9 +533,8 @@ class BalancedTeamsView(discord.ui.View):
                 inline=False
             )
             
-            # Edita a mensagem do componente diretamente após o defer
-            await interaction.message.edit(embed=embed, view=self)
-            
+            await interaction.edit_original_response(embed=embed, view=self)
+        
         except Exception as e:
             await interaction.followup.send(f"❌ Erro ao rebalancear: {str(e)}", ephemeral=True)
 

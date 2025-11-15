@@ -17,7 +17,7 @@ class PlayerCog(commands.Cog):
         riot_id="Seu Riot ID completo (ex: NomeDeInvocador#BR1)", 
         rank="Seu rank atual no LoL (ex: Ouro IV) - usado apenas para balanceamento"
     )
-    @commands.cooldown(1, 30, commands.BucketType.user)  # 1 uso a cada 30 segundos por usuário
+    @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
     async def registrar(self, interaction: discord.Interaction, riot_id: str, rank: str):
         await interaction.response.defer(ephemeral=True)
         
@@ -83,7 +83,7 @@ class PlayerCog(commands.Cog):
 
     @app_commands.command(name="perfil", description="Veja o perfil de um jogador.")
     @app_commands.describe(jogador="O jogador cujo perfil você quer ver (opcional, mostra o seu se não for especificado).")
-    @commands.cooldown(1, 3, commands.BucketType.user)  # 1 uso a cada 3 segundos por usuário
+    @app_commands.checks.cooldown(1, 3.0, key=lambda i: i.user.id)
     async def perfil(self, interaction: discord.Interaction, jogador: Optional[discord.Member] = None):
         target_user = jogador or interaction.user
         
@@ -124,7 +124,7 @@ class PlayerCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="leaderboard", description="Veja o ranking dos jogadores.")
-    @commands.cooldown(1, 5, commands.BucketType.user)  # 1 uso a cada 5 segundos por usuário
+    @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     async def leaderboard(self, interaction: discord.Interaction):
         players = await db_manager.get_all_players()
         

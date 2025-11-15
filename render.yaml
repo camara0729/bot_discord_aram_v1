@@ -1,6 +1,6 @@
 # render.yaml
 services:
-  - type: web
+  - type: worker
     name: aram-discord-bot
     env: python
     buildCommand: pip install -r requirements.txt
@@ -10,6 +10,10 @@ services:
         sync: false
       - key: RIOT_API_KEY
         sync: false
+      - key: BACKUP_WEBHOOK_URL
+        sync: false
+      - key: DATABASE_PATH
+        value: /app/data/bot_database.db
     disk:
       name: bot-data
       mountPath: /app/data

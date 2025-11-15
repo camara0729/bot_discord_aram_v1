@@ -1,15 +1,16 @@
 # main.py
-import discord
-from discord.ext import commands, tasks
 import asyncio
 import os
-import aiohttp
-from aiohttp import web
-from dotenv import load_dotenv
-import threading
 from datetime import datetime
+from pathlib import Path
+
+import discord
+from discord import app_commands
+from discord.ext import commands, tasks
+from dotenv import load_dotenv
 
 from utils.database_manager import db_manager
+from utils.backup_transport import send_backup_file
 
 load_dotenv()
 
@@ -17,10 +18,6 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN') or os.getenv('DISCORD_BOT_TOKEN')
 if not TOKEN:
     raise ValueError("Token do Discord não encontrado. Configure a variável DISCORD_TOKEN no Render.")
-
-# Configurações do keep-alive
-PORT = int(os.getenv('PORT', 10000))  # Render usa a porta definida na variável PORT
-RENDER_URL = os.getenv('RENDER_EXTERNAL_URL', f'http://localhost:{PORT}')
 
 # Configurar intents
 intents = discord.Intents.default()
@@ -48,9 +45,9 @@ async def on_ready():
     await db_manager.initialize_database()
     
     # Iniciar sistema keep-alive
-    keep_alive_ping.start()
-    periodic_git_backup.start()
-    print("🚀 Sistema keep-alive iniciado")
+    if not periodic_backup_task.is_running():
+        periodic_backup_task.start()
+        print("💾 Rotina de backup remoto iniciada")
 
 async def auto_migrate_if_needed():
     """Executa migração automática se backup existir e banco estiver vazio."""
@@ -85,100 +82,74 @@ async def auto_migrate_if_needed():
     else:
         print("📋 Nenhum backup de migração encontrado")
 
-async def git_backup_system():
-    """Sistema de backup automático via Git para Render free tier."""
-    import os
-    import subprocess
-    from pathlib import Path
-    from datetime import datetime, timedelta
-    
+async def remote_backup_system(force: bool = False):
+    """Sistema de backup automático enviando JSON para um webhook externo."""
+    from datetime import timedelta
+
     try:
-        # Verificar se estamos no Render (free tier sem persistência)
         is_render = os.getenv('RENDER')
-        if not is_render:
-            print("📍 Não está no Render - sistema de backup Git desnecessário")
+        if not is_render and not force:
+            print("📍 Não está no Render - backup remoto ignorado")
             return
-            
-        print("🔄 Iniciando sistema de backup Git para Render free tier...")
-        
-        # Configurações
-        backup_frequency_hours = int(os.getenv('BACKUP_FREQUENCY_HOURS', '6'))  # Backup a cada 6h
-        backup_file = "auto_backup_render.json"
-        last_backup_file = ".last_backup_time"
-        
-        # Verificar se precisa fazer backup
-        should_backup = False
-        
-        if Path(last_backup_file).exists():
+
+        webhook_url = os.getenv('BACKUP_WEBHOOK_URL')
+        if not webhook_url:
+            print("⚠️ BACKUP_WEBHOOK_URL não configurada - backup remoto inativo")
+            return
+
+        backup_frequency_hours = int(os.getenv('BACKUP_FREQUENCY_HOURS', '6'))
+        backup_file = 'auto_backup_render.json'
+        last_backup_marker = Path('.last_backup_time')
+
+        should_backup = force
+        if not should_backup and last_backup_marker.exists():
             try:
-                with open(last_backup_file, 'r') as f:
-                    last_backup_str = f.read().strip()
-                last_backup = datetime.fromisoformat(last_backup_str)
+                last_backup = datetime.fromisoformat(last_backup_marker.read_text().strip())
                 time_since_backup = datetime.now() - last_backup
-                
                 if time_since_backup >= timedelta(hours=backup_frequency_hours):
                     should_backup = True
-                    print(f"⏰ Último backup: {time_since_backup} atrás - fazendo novo backup")
+                    print(f"⏰ Último backup há {time_since_backup} - iniciando novo backup")
                 else:
-                    print(f"✅ Backup recente ({time_since_backup} atrás) - aguardando")
-            except:
+                    print(f"✅ Backup recente ({time_since_backup}) - aguardando próxima janela")
+            except Exception:
                 should_backup = True
-                print("⚠️ Erro ao ler horário do último backup - fazendo backup")
-        else:
+                print("⚠️ Não foi possível ler o último backup - recriando")
+        elif not should_backup:
             should_backup = True
-            print("🔍 Primeiro backup - criando backup inicial")
-        
-        if should_backup:
-            # Verificar se há dados para backup
-            players = await db_manager.get_all_players()
-            if len(players) > 0:
-                print(f"📊 Fazendo backup de {len(players)} jogadores...")
-                
-                # Import dinâmico
-                from backup_restore_db import backup_database
-                success_file = await backup_database(backup_file)
-                
-                if success_file:
-                    # Tentar fazer commit e push para Git
-                    try:
-                        # Configurar git se necessário
-                        subprocess.run(['git', 'config', '--global', 'user.email', 'render-bot@noreply.com'], 
-                                     capture_output=True, check=False)
-                        subprocess.run(['git', 'config', '--global', 'user.name', 'Render Auto Backup'], 
-                                     capture_output=True, check=False)
-                        
-                        # Add, commit e push
-                        subprocess.run(['git', 'add', backup_file], capture_output=True, check=True)
-                        
-                        commit_msg = f"Auto backup - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {len(players)} players"
-                        subprocess.run(['git', 'commit', '-m', commit_msg], capture_output=True, check=True)
-                        
-                        # Tentar push (pode falhar se não tiver permissões)
-                        result = subprocess.run(['git', 'push'], capture_output=True, check=False)
-                        
-                        if result.returncode == 0:
-                            print("✅ Backup enviado para Git com sucesso!")
-                            
-                            # Salvar timestamp do backup
-                            with open(last_backup_file, 'w') as f:
-                                f.write(datetime.now().isoformat())
-                            
-                        else:
-                            print(f"⚠️ Falha ao enviar backup para Git: {result.stderr.decode()}")
-                            print("💾 Backup local criado, mas não enviado para repositório")
-                        
-                    except subprocess.CalledProcessError as e:
-                        print(f"⚠️ Erro no Git: {e}")
-                        print("💾 Backup local mantido")
-                    except Exception as e:
-                        print(f"⚠️ Erro inesperado no backup Git: {e}")
-                else:
-                    print("❌ Falha ao criar arquivo de backup")
-            else:
-                print("📭 Banco vazio - não há dados para backup")
-                
+            print("🔍 Nenhum backup anterior - iniciando backup inicial")
+
+        if not should_backup:
+            return
+
+        players = await db_manager.get_all_players()
+        if not players:
+            print("📭 Banco vazio - backup remoto ignorado")
+            return
+
+        from backup_restore_db import backup_database
+
+        print(f"📤 Preparando backup remoto de {len(players)} jogadores...")
+        success_file = await backup_database(backup_file)
+        if not success_file:
+            print("❌ Falha ao gerar arquivo de backup")
+            return
+
+        description = (
+            f"Backup automático {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - "
+            f"{len(players)} jogadores"
+        )
+        uploaded = await send_backup_file(success_file, description)
+        if uploaded:
+            last_backup_marker.write_text(datetime.now().isoformat())
+            try:
+                Path(success_file).unlink(missing_ok=True)
+            except Exception:
+                pass
+        else:
+            print("⚠️ Backup criado mas não foi possível enviar ao webhook")
+
     except Exception as e:
-        print(f"❌ Erro no sistema de backup Git: {e}")
+        print(f"❌ Erro no sistema de backup remoto: {e}")
 
 async def restore_from_git_backup():
     """Restaura dados do último backup Git disponível."""
@@ -216,78 +187,16 @@ async def restore_from_git_backup():
         print(f"❌ Erro ao restaurar do backup Git: {e}")
         return False
 
-# Sistema de Keep-Alive para evitar hibernação
-async def health_check(request):
-    """Endpoint de health check para manter o serviço ativo."""
-    return web.json_response({
-        'status': 'alive',
-        'bot': bot.user.name if bot.user else 'Not ready',
-        'timestamp': datetime.now().isoformat(),
-        'guilds': len(bot.guilds),
-        'uptime': 'online'
-    })
-
-async def start_web_server():
-    """Inicia servidor HTTP para keep-alive."""
-    app = web.Application()
-    app.router.add_get('/', health_check)
-    app.router.add_get('/health', health_check)
-    app.router.add_get('/ping', health_check)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    print(f"🌐 Servidor web iniciado na porta {PORT}")
-
 @tasks.loop(hours=1)
-async def periodic_git_backup():
-    """Executa backup Git periodicamente sem impactar o keep-alive."""
+async def periodic_backup_task():
+    """Executa o processo de backup remoto periodicamente."""
     try:
-        if 'git_backup_system' in globals():
-            await git_backup_system()
+        await remote_backup_system()
     except Exception as e:
         print(f"⚠️ Erro no backup periódico: {e}")
 
-@tasks.loop(minutes=8)  # Ping mais frequente para evitar hibernação
-async def keep_alive_ping():
-    """Faz ping no próprio serviço a cada 10 minutos para evitar hibernação."""
-    try:
-        render_url = os.getenv('RENDER_EXTERNAL_URL')
-        if render_url:
-            timeout = aiohttp.ClientTimeout(total=30, connect=15)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(f"{render_url}/ping") as response:
-                    if response.status == 200:
-                        current_time = datetime.now().strftime('%H:%M:%S')
-                        print(f"✅ Keep-alive ping successful - {current_time}")
-                    else:
-                        print(f"⚠️ Keep-alive ping failed: HTTP {response.status}")
-        else:
-            # Fallback: fazer ping no localhost
-            try:
-                timeout = aiohttp.ClientTimeout(total=15)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(f"http://localhost:{PORT}/health") as response:
-                        current_time = datetime.now().strftime('%H:%M:%S')
-                        print(f"💓 Local keep-alive heartbeat - {current_time}")
-            except:
-                current_time = datetime.now().strftime('%H:%M:%S')
-                print(f"💓 Keep-alive heartbeat (no HTTP) - {current_time}")
-                
-    except asyncio.TimeoutError:
-        print(f"⏰ Keep-alive ping timeout - {datetime.now().strftime('%H:%M:%S')}")
-    except Exception as e:
-        print(f"❌ Erro no keep-alive ping: {e}")
-        # Continue funcionando mesmo com erro
 
-@keep_alive_ping.before_loop
-async def before_keep_alive():
-    """Aguarda o bot estar pronto antes de iniciar o keep-alive."""
-    await bot.wait_until_ready()
-    print("🚀 Sistema keep-alive iniciado")
-
-@periodic_git_backup.before_loop
+@periodic_backup_task.before_loop
 async def before_backup():
     await bot.wait_until_ready()
 
@@ -298,7 +207,7 @@ async def load_cogs():
         'team_cog',
         'match_cog',
         'admin_cog',
-        # Adicione outros cogs aqui conforme necessário
+        'ranking_cog',
     ]
     
     for cog_name in cog_files:
@@ -340,6 +249,28 @@ async def on_command_error(ctx, error):
         print(f"Erro no comando {ctx.command}: {error}")
         await ctx.send("❌ Ocorreu um erro interno. Tente novamente.")
 
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: Exception):
+    if isinstance(error, app_commands.CommandOnCooldown):
+        message = f"⏱️ Comando em cooldown. Tente novamente em {error.retry_after:.1f} segundos."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+        return
+
+    print(f"Erro em slash command {interaction.command}: {error}")
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send("❌ Ocorreu um erro interno. Tente novamente.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Ocorreu um erro interno. Tente novamente.", ephemeral=True)
+    except discord.InteractionResponded:
+        pass
+
 async def main():
     try:
         # Sistema de backup/restore para Render free tier
@@ -348,11 +279,7 @@ async def main():
         # Executar migração automática se necessário (sistema legado)
         await auto_migrate_if_needed()
         
-        # Iniciar servidor web e bot em paralelo
-        await asyncio.gather(
-            start_web_server(),
-            bot.start(TOKEN)
-        )
+        await bot.start(TOKEN)
             
     except KeyboardInterrupt:
         print("Bot desligado pelo usuário")

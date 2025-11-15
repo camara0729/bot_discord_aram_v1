@@ -5,6 +5,7 @@ from discord.ext import commands
 from typing import Optional
 import os
 from utils.database_manager import db_manager
+from utils.backup_transport import send_backup_file
 import config
 
 class AdminCog(commands.Cog):
@@ -77,7 +78,7 @@ class AdminCog(commands.Cog):
             
             # Atualizar no banco
             import aiosqlite
-            async with aiosqlite.connect("bot_database.db") as db:
+            async with aiosqlite.connect(db_manager.db_path) as db:
                 await db.execute("""
                     UPDATE players 
                     SET pdl = ?, wins = ?, losses = ?, mvp_count = ?, bagre_count = ?, updated_at = CURRENT_TIMESTAMP
@@ -151,7 +152,7 @@ class AdminCog(commands.Cog):
                 return
             
             import aiosqlite
-            async with aiosqlite.connect("bot_database.db") as db:
+            async with aiosqlite.connect(db_manager.db_path) as db:
                 # Verificar se já existe
                 async with db.execute("SELECT discord_id FROM players WHERE discord_id = ?", (usuario.id,)) as cursor:
                     existing = await cursor.fetchone()
@@ -202,7 +203,7 @@ class AdminCog(commands.Cog):
         
         try:
             import aiosqlite
-            async with aiosqlite.connect("bot_database.db") as db:
+            async with aiosqlite.connect(db_manager.db_path) as db:
                 # Remover o ID fictício do Nicous
                 await db.execute("DELETE FROM players WHERE discord_id = ?", (1234567890123456789,))
                 
@@ -290,7 +291,7 @@ class AdminCog(commands.Cog):
             corrected_count = 0
             errors = []
             
-            async with aiosqlite.connect("bot_database.db") as db:
+            async with aiosqlite.connect(db_manager.db_path) as db:
                 for discord_id, stats in corrections.items():
                     try:
                         # Verificar se o jogador existe
@@ -357,15 +358,13 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {str(e)}")
 
-    @app_commands.command(name="fazer_backup", description="[ADMIN] Cria backup manual dos dados para Git.")
+    @app_commands.command(name="fazer_backup", description="[ADMIN] Cria backup manual e envia para o webhook configurado.")
     @app_commands.default_permissions(administrator=True)
     async def fazer_backup(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            import subprocess
             from datetime import datetime
-            from pathlib import Path
             from backup_restore_db import backup_database
             
             # Verificar quantos dados temos
@@ -381,32 +380,16 @@ class AdminCog(commands.Cog):
             success_file = await backup_database(backup_file)
             
             if success_file:
-                # Tentar enviar para Git
-                try:
-                    # Configurar git
-                    subprocess.run(['git', 'config', '--global', 'user.email', 'admin-bot@noreply.com'], 
-                                 capture_output=True, check=False)
-                    subprocess.run(['git', 'config', '--global', 'user.name', 'Admin Manual Backup'], 
-                                 capture_output=True, check=False)
-                    
-                    # Add e commit
-                    subprocess.run(['git', 'add', success_file], capture_output=True, check=True)
-                    
-                    commit_msg = f"Manual backup by {interaction.user.name} - {len(players)} players"
-                    subprocess.run(['git', 'commit', '-m', commit_msg], capture_output=True, check=True)
-                    
-                    # Tentar push
-                    result = subprocess.run(['git', 'push'], capture_output=True, check=False)
-                    
-                    if result.returncode == 0:
-                        await interaction.followup.send(f"✅ Backup criado e enviado para Git!\n📁 Arquivo: `{success_file}`\n👥 Jogadores: {len(players)}")
-                    else:
-                        await interaction.followup.send(f"⚠️ Backup criado mas falha no Git!\n📁 Arquivo local: `{success_file}`\n```{result.stderr.decode()[:500]}```")
-                        
-                except subprocess.CalledProcessError as e:
-                    await interaction.followup.send(f"⚠️ Backup criado mas erro no Git:\n📁 Arquivo: `{success_file}`\n❌ Erro: {e}")
-                except Exception as e:
-                    await interaction.followup.send(f"⚠️ Backup criado mas erro inesperado:\n📁 Arquivo: `{success_file}`\n❌ Erro: {str(e)}")
+                uploaded = await send_backup_file(success_file, f"Backup manual acionado por {interaction.user.display_name}")
+                if uploaded:
+                    await interaction.followup.send(
+                        f"✅ Backup criado e enviado!\n📁 Arquivo: `{success_file}`\n👥 Jogadores: {len(players)}"
+                    )
+                else:
+                    await interaction.followup.send(
+                        f"⚠️ Backup criado mas não foi possível enviá-lo automaticamente.\n"
+                        f"📁 Arquivo local: `{success_file}`\nConfigure `BACKUP_WEBHOOK_URL` para habilitar o envio."
+                    )
             else:
                 await interaction.followup.send("❌ Falha ao criar arquivo de backup!")
                 
@@ -507,13 +490,12 @@ class AdminCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {str(e)}")
 
-    @app_commands.command(name="status_backup", description="[ADMIN] Verifica status do sistema de backup Git.")
+    @app_commands.command(name="status_backup", description="[ADMIN] Verifica status do sistema de backup.")
     @app_commands.default_permissions(administrator=True)
     async def status_backup(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            import subprocess
             import os
             from pathlib import Path
             from datetime import datetime
@@ -521,6 +503,7 @@ class AdminCog(commands.Cog):
             # Informações básicas
             players = await db_manager.get_all_players()
             is_render = os.getenv('RENDER')
+            webhook_url = os.getenv('BACKUP_WEBHOOK_URL')
             
             embed = discord.Embed(
                 title="📊 Status do Sistema de Backup",
@@ -531,6 +514,18 @@ class AdminCog(commands.Cog):
             embed.add_field(
                 name="📈 Dados Atuais",
                 value=f"👥 **{len(players)}** jogadores registrados\n🏗️ Ambiente: {'Render Free Tier' if is_render else 'Local/Outro'}",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="🌐 Webhook",
+                value="✅ Configurado" if webhook_url else "⚠️ Configure BACKUP_WEBHOOK_URL para envio automático",
+                inline=False
+            )
+
+            embed.add_field(
+                name="💽 Local do Banco",
+                value=f"`{db_manager.db_path}`",
                 inline=False
             )
             
@@ -552,32 +547,10 @@ class AdminCog(commands.Cog):
                     value=backup_info or "Nenhum arquivo encontrado",
                     inline=False
                 )
-            
-            # Status do Git
-            try:
-                # Verificar status do repositório
-                git_status = subprocess.run(['git', 'status', '--porcelain'], 
-                                          capture_output=True, text=True, check=True)
-                
-                git_log = subprocess.run(['git', 'log', '-1', '--format=%h %s (%cr)'], 
-                                       capture_output=True, text=True, check=True)
-                
-                git_info = f"📝 Último commit: `{git_log.stdout.strip()}`\n"
-                if git_status.stdout.strip():
-                    git_info += f"⚠️ Alterações não commitadas: {len(git_status.stdout.strip().splitlines())} arquivos"
-                else:
-                    git_info += "✅ Repositório limpo"
-                
+            else:
                 embed.add_field(
-                    name="🔄 Status do Git",
-                    value=git_info,
-                    inline=False
-                )
-                
-            except subprocess.CalledProcessError:
-                embed.add_field(
-                    name="🔄 Status do Git",
-                    value="❌ Erro ao acessar repositório Git",
+                    name="💾 Arquivos de Backup Locais",
+                    value="📭 Nenhum arquivo local encontrado",
                     inline=False
                 )
             

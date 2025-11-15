@@ -1,134 +1,30 @@
-# 🚀 Sistema Keep-Alive 24/7
+# 🚀 Execução Contínua sem Keep-Alive
 
-Este bot implementa um sistema completo para evitar a hibernação no plano gratuito do Render.
+O bot agora roda como **Worker** no Render, portanto não depende mais de endpoints HTTP ou scripts externos para se manter acordado. O processo principal permanece ativo 24/7 enquanto houver horas disponíveis no plano gratuito.
 
-## 🔧 Como Funciona
+## ✔️ O que mudou
+- `render.yaml` e `Procfile` usam `type: worker`, eliminando o servidor web/`/health`.
+- O loop de keep-alive/AioHTTP foi removido do `main.py`; apenas o Discord bot é iniciado.
+- Nenhuma chamada externa periódica é necessária para evitar hibernação.
 
-### 1. **Servidor HTTP Interno**
-- Bot roda um servidor web na porta definida pelo Render
-- Endpoints disponíveis: `/`, `/health`, `/ping`
-- Responde com status do bot em JSON
+## 📦 Como configurar no Render
+1. Crie um serviço **Worker** apontando para este repositório.
+2. Build command: `pip install -r requirements.txt`
+3. Start command: `python main.py`
+4. Configure as variáveis obrigatórias:
+   - `DISCORD_TOKEN`
+   - `RIOT_API_KEY`
+   - `DATABASE_PATH=/app/data/bot_database.db` (usa o disco persistente)
+   - `BACKUP_WEBHOOK_URL` (para envio automático dos backups JSON)
 
-### 2. **Auto-Ping Interno**
-- Bot faz ping em si mesmo a cada 10 minutos
-- Evita hibernação do plano gratuito (15 min)
-- Logs automáticos de keep-alive
+O Worker não expõe portas, portanto nenhum health-check HTTP é necessário.
 
-### 3. **Pinger Externo (Opcional)**
-- Script separado (`external_pinger.py`) 
-- Pode rodar em outro servidor/computador
-- Pinga o bot a cada 12 minutos
+## 🔎 Monitoramento opcional
+Se quiser visibilidade adicional:
+- Use um canal privado do Discord para receber logs do Render (Streaming logs).
+- Configure alertas do próprio Discord (Status > Incident) ou monitores que chequem a presença do bot via API (`discord.py` já loga reconexões).
 
-## 📋 Configuração no Render
+## 🧹 E o antigo `external_pinger.py`?
+Esse script tornou-se opcional e pode ser removido. Ele só faz sentido se você hospedar o bot como Web Service em outro provedor.
 
-### Variáveis de Ambiente Necessárias:
-```
-DISCORD_TOKEN=seu_token_aqui
-RIOT_API_KEY=sua_chave_aqui
-PORT=10000  # Automático no Render
-RENDER_EXTERNAL_URL=https://seu-bot.onrender.com  # Automático
-```
-
-### Configurações do Serviço:
-```
-Build Command: pip install -r requirements.txt
-Start Command: python main.py
-Port: 10000 (ou a porta que o Render definir)
-```
-
-## 🌐 Endpoints do Bot
-
-Após deploy, seu bot terá os endpoints:
-
-- `https://seu-bot.onrender.com/` - Status geral
-- `https://seu-bot.onrender.com/health` - Health check
-- `https://seu-bot.onrender.com/ping` - Keep-alive ping
-
-### Exemplo de resposta:
-```json
-{
-  "status": "alive",
-  "bot": "ARAM Bot",
-  "timestamp": "2025-09-26T14:30:00",
-  "guilds": 1,
-  "uptime": "online"
-}
-```
-
-## 🤖 Uso do Pinger Externo
-
-### 1. Configure a URL do bot:
-```bash
-# No arquivo .env
-BOT_URL=https://seu-bot.onrender.com
-```
-
-### 2. Execute o pinger:
-```bash
-python external_pinger.py
-```
-
-### 3. Logs do pinger:
-```
-🚀 Iniciando pinger externo do bot...
-🎯 URL do bot: https://seu-bot.onrender.com
-✅ Bot ativo - ARAM Bot - 14:30:15
-💓 Bot mantido ativo
-```
-
-## 📊 Monitoramento
-
-### Logs do Bot:
-```
-🌐 Servidor web iniciado na porta 10000
-🚀 Sistema keep-alive iniciado
-✅ Keep-alive ping successful - 14:20:00
-✅ Keep-alive ping successful - 14:30:00
-```
-
-### Status no Render:
-- Aba "Logs": Acompanhe pings em tempo real
-- Aba "Metrics": CPU/RAM sempre ativo
-- Status: "Live" (verde) continuamente
-
-## ⚠️ Importante
-
-### Plano Gratuito:
-- ✅ **Funciona** mas tem limitações de CPU
-- ✅ **Keep-alive** evita hibernação
-- ⚠️ **500 horas/mês** de uso gratuito
-
-### Plano Pago ($7/mês):
-- ✅ **Sem hibernação** nativa
-- ✅ **Melhor performance**
-- ✅ **Keep-alive** como backup
-
-## 🔍 Troubleshooting
-
-### Bot hibernando mesmo assim:
-1. Verifique logs do keep-alive
-2. Confirme se endpoints respondem
-3. Use pinger externo como backup
-
-### Erro de porta:
-```python
-# O Render define PORT automaticamente
-PORT = int(os.getenv('PORT', 10000))
-```
-
-### Erro de URL:
-```python
-# URL é definida automaticamente pelo Render
-RENDER_URL = os.getenv('RENDER_EXTERNAL_URL')
-```
-
-## 🎯 Resultado
-
-Com este sistema implementado:
-- ✅ **Bot ativo 24/7** no plano gratuito
-- ✅ **Ping automático** a cada 10 minutos  
-- ✅ **Servidor web** respondendo sempre
-- ✅ **Logs detalhados** de monitoramento
-- ✅ **Backup externo** opcional
-
-Seu bot Discord ARAM ficará online continuamente! 🎮✨
+Com esse ajuste, o bot permanece on-line continuamente sem depender de gambiarras de keep-alive. 🎉
