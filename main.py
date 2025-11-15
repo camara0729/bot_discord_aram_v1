@@ -19,6 +19,7 @@ load_dotenv()
 # Configurações do Render/Web Service
 PORT = int(os.getenv('PORT', 10000))
 RENDER_URL = os.getenv('RENDER_EXTERNAL_URL', f'http://localhost:{PORT}')
+SEASON_RESET_KEY = "season_reset_v2"
 
 # Configurações do bot
 TOKEN = os.getenv('DISCORD_TOKEN') or os.getenv('DISCORD_BOT_TOKEN')
@@ -49,6 +50,7 @@ async def on_ready():
     # Inicializar o banco de dados
     print("📚 Inicializando banco de dados...")
     await db_manager.initialize_database()
+    await season_reset_if_needed()
     
     # Iniciar sistema keep-alive
     if not periodic_backup_task.is_running():
@@ -195,6 +197,22 @@ async def restore_from_git_backup():
     except Exception as e:
         print(f"❌ Erro ao restaurar do backup Git: {e}")
         return False
+
+
+async def season_reset_if_needed():
+    """Reseta o PDL de todos os jogadores uma única vez por temporada."""
+    try:
+        current_marker = await db_manager.get_metadata(SEASON_RESET_KEY)
+        if current_marker:
+            print(f"🏁 Reset da temporada já aplicado em {current_marker}")
+            return
+
+        print("🔁 Resetando PDL de todos os jogadores para o início da temporada...")
+        affected = await db_manager.reset_all_pdl()
+        await db_manager.set_metadata(SEASON_RESET_KEY, datetime.now().isoformat())
+        print(f"✅ Reset aplicado para {affected} jogadores")
+    except Exception as e:
+        print(f"❌ Falha ao aplicar reset de temporada: {e}")
 
 async def health_check(request):
     """Endpoint de health check para manter o serviço ativo no Render."""

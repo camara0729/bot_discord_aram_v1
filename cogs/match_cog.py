@@ -155,7 +155,7 @@ class MatchCog(commands.Cog):
             if special_text:
                 embed.add_field(name="🎯 Destaques", value=special_text, inline=False)
             
-            embed.set_footer(text="Use /leaderboard para ver o ranking atualizado!")
+            embed.set_footer(text="Use /ranking para ver o ranking atualizado!")
             
             await interaction.followup.send(embed=embed)
             
@@ -306,7 +306,7 @@ class MatchCog(commands.Cog):
             if special_text:
                 embed.add_field(name="🎯 Destaques", value=special_text, inline=False)
             
-            embed.set_footer(text="⚡ Resultado registrado rapidamente! Use /leaderboard para ver o ranking.")
+            embed.set_footer(text="⚡ Resultado registrado rapidamente! Use /ranking para ver o ranking.")
             
             await interaction.followup.send(embed=embed)
             

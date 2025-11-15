@@ -189,7 +189,7 @@ class AdminCog(commands.Cog):
             embed.add_field(name="🏅 Rank LoL", value=rank, inline=True)
             embed.add_field(name=f"{elo_info['emoji']} PDL", value=f"{pdl} ({elo_info['name']})", inline=True)
             embed.add_field(name="📊 Record", value=f"{wins}W/{losses}L", inline=True)
-            embed.set_footer(text="Use /leaderboard para verificar!")
+            embed.set_footer(text="Use /ranking para verificar!")
             
             await interaction.followup.send(embed=embed)
             
@@ -346,7 +346,7 @@ class AdminCog(commands.Cog):
             embed.add_field(
                 name="🎯 Próximo Passo",
                 value=(
-                    "Execute `/leaderboard` para verificar os dados corretos!\n"
+                    "Execute `/ranking` para verificar os dados corretos!\n"
                     "Se precisar adicionar um jogador faltando, use `/addplayer usuario:@Nicous riot_id:Nick#TAG rank:BRONZE III pdl:910 wins:1 losses:5`.\n"
                     "Depois ajuste MVPs/Bagres com `/ajustar_stats` se necessário."
                 ),
@@ -479,7 +479,7 @@ class AdminCog(commands.Cog):
                 )
                 embed.add_field(
                     name="🎯 Próximo Passo",
-                    value="Execute `/leaderboard` para verificar os dados!",
+                    value="Execute `/ranking` para verificar os dados!",
                     inline=True
                 )
                 

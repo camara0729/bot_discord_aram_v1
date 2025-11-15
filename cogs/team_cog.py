@@ -33,13 +33,6 @@ class TeamCog(commands.Cog):
         view = ParticipantSelectionView(participantes, interaction.user, interaction.guild.id)
         await interaction.response.send_message(embed=embed, view=view)
 
-    # Alias para compatibilidade: muitos usuários usam /time
-    @app_commands.command(name="time", description="(Alias de /times) Gere times balanceados para uma partida ARAM.")
-    @app_commands.describe(participantes="Número de participantes (4, 6, 8 ou 10)")
-    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
-    async def time(self, interaction: discord.Interaction, participantes: int):
-        await self.times(interaction, participantes)
-    
     async def _process_team_balancing(self, interaction: discord.Interaction, jogadores: str):
         try:
             # Processar a string de jogadores
@@ -308,12 +301,15 @@ class ParticipantSelectionView(discord.ui.View):
         # Atualizar embed
         embed = discord.Embed(
             title="⚔️ Criando Times ARAM",
-            description=f"**Participantes necessários:** {self.max_participants}\\n**Participantes atuais:** {len(self.participants)}\\n\\n🎯 Clique no botão abaixo para entrar na partida!",
+            description=(
+                f"**Participantes necessários:** {self.max_participants}\n"
+                f"**Participantes atuais:** {len(self.participants)}\n\n🎯 Clique no botão abaixo para entrar na partida!"
+            ),
             color=discord.Color.blue()
         )
         
         # Lista de participantes
-        participant_list = "\\n".join([f"{i+1}. {p.mention}" for i, p in enumerate(self.participants)])
+        participant_list = "\n".join([f"{i+1}. {p.mention}" for i, p in enumerate(self.participants)])
         embed.add_field(
             name="👥 Participantes Confirmados",
             value=participant_list if participant_list else "Nenhum participante ainda",
@@ -323,7 +319,10 @@ class ParticipantSelectionView(discord.ui.View):
         # Se completou o número necessário, habilitar balanceamento
         if len(self.participants) == self.max_participants:
             embed.color = discord.Color.green()
-            embed.description = f"✅ **{self.max_participants}** participantes confirmados!\\n🎲 Clique em 'Balancear Times' para gerar os times!"
+            embed.description = (
+                f"✅ **{self.max_participants}** participantes confirmados!\n"
+                "🎲 Clique em 'Balancear Times' para gerar os times!"
+            )
             
             # Adicionar botão de balanceamento
             balance_button = discord.ui.Button(label="🎲 Balancear Times", style=discord.ButtonStyle.success)
@@ -349,13 +348,16 @@ class ParticipantSelectionView(discord.ui.View):
         # Atualizar embed
         embed = discord.Embed(
             title="⚔️ Criando Times ARAM",
-            description=f"**Participantes necessários:** {self.max_participants}\\n**Participantes atuais:** {len(self.participants)}\\n\\n🎯 Clique no botão abaixo para entrar na partida!",
+            description=(
+                f"**Participantes necessários:** {self.max_participants}\n"
+                f"**Participantes atuais:** {len(self.participants)}\n\n🎯 Clique no botão abaixo para entrar na partida!"
+            ),
             color=discord.Color.blue()
         )
         
         # Lista de participantes
         if self.participants:
-            participant_list = "\\n".join([f"{i+1}. {p.mention}" for i, p in enumerate(self.participants)])
+            participant_list = "\n".join([f"{i+1}. {p.mention}" for i, p in enumerate(self.participants)])
             embed.add_field(
                 name="👥 Participantes Confirmados",
                 value=participant_list,
@@ -416,26 +418,28 @@ class ParticipantSelectionView(discord.ui.View):
             blue_text = ""
             for i, player in enumerate(blue_team, 1):
                 elo_info = config.get_elo_by_pdl(player['data']['pdl'])
-                blue_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\\n"
-                blue_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\\n"
+                blue_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\n"
+                blue_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\n"
 
             embed.add_field(name="🔵 Time Azul", value=blue_text, inline=True)
 
             red_text = ""
             for i, player in enumerate(red_team, 1):
                 elo_info = config.get_elo_by_pdl(player['data']['pdl'])
-                red_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\\n"
-                red_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\\n"
+                red_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\n"
+                red_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\n"
 
             embed.add_field(name="🔴 Time Vermelho", value=red_text, inline=True)
 
             balance_quality = team_cog._get_balance_quality(difference)
             embed.add_field(
                 name="📊 Estatísticas",
-                value=f"**Força Média Time Azul:** {blue_avg:.1f}\\n"
-                      f"**Força Média Time Vermelho:** {red_avg:.1f}\\n"
-                      f"**Diferença:** {difference:.1f}\\n"
-                      f"**Qualidade:** {balance_quality['emoji']} {balance_quality['text']}",
+                value=(
+                    f"**Força Média Time Azul:** {blue_avg:.1f}\n"
+                    f"**Força Média Time Vermelho:** {red_avg:.1f}\n"
+                    f"**Diferença:** {difference:.1f}\n"
+                    f"**Qualidade:** {balance_quality['emoji']} {balance_quality['text']}"
+                ),
                 inline=False
             )
 
@@ -510,26 +514,28 @@ class BalancedTeamsView(discord.ui.View):
             blue_text = ""
             for i, player in enumerate(new_blue, 1):
                 elo_info = config.get_elo_by_pdl(player['data']['pdl'])
-                blue_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\\n"
-                blue_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\\n"
+                blue_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\n"
+                blue_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\n"
             
             embed.add_field(name="🔵 Time Azul", value=blue_text, inline=True)
             
             red_text = ""
             for i, player in enumerate(new_red, 1):
                 elo_info = config.get_elo_by_pdl(player['data']['pdl'])
-                red_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\\n"
-                red_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\\n"
+                red_text += f"{i}. {elo_info['emoji']} {player['user'].mention}\n"
+                red_text += f"   `{elo_info['name']} - {player['data']['pdl']} PDL`\n"
             
             embed.add_field(name="🔴 Time Vermelho", value=red_text, inline=True)
             
             balance_quality = team_cog._get_balance_quality(difference)
             embed.add_field(
                 name="📊 Estatísticas",
-                value=f"**Força Média Time Azul:** {blue_avg:.1f}\\n"
-                      f"**Força Média Time Vermelho:** {red_avg:.1f}\\n"
-                      f"**Diferença:** {difference:.1f}\\n"
-                      f"**Qualidade:** {balance_quality['emoji']} {balance_quality['text']}",
+                value=(
+                    f"**Força Média Time Azul:** {blue_avg:.1f}\n"
+                    f"**Força Média Time Vermelho:** {red_avg:.1f}\n"
+                    f"**Diferença:** {difference:.1f}\n"
+                    f"**Qualidade:** {balance_quality['emoji']} {balance_quality['text']}"
+                ),
                 inline=False
             )
             

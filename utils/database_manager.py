@@ -89,6 +89,13 @@ class DatabaseManager:
                 )
             ''')
             
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
+            
             await db.commit()
             print("Banco de dados inicializado com sucesso!")
 
@@ -349,6 +356,45 @@ class DatabaseManager:
                 return True
         except Exception as e:
             print(f"Erro ao atualizar username: {e}")
+            return False
+
+    async def reset_all_pdl(self, new_pdl: int = config.DEFAULT_PDL) -> int:
+        """Define o PDL de todos os jogadores para um valor específico."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute('''
+                    UPDATE players
+                    SET pdl = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (new_pdl,))
+                await db.commit()
+                return cursor.rowcount or 0
+        except Exception as e:
+            print(f"Erro ao resetar PDL global: {e}")
+            return 0
+
+    async def get_metadata(self, key: str) -> Optional[str]:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute('SELECT value FROM metadata WHERE key = ?', (key,)) as cursor:
+                    row = await cursor.fetchone()
+                    return row[0] if row else None
+        except Exception as e:
+            print(f"Erro ao buscar metadata {key}: {e}")
+            return None
+
+    async def set_metadata(self, key: str, value: str) -> bool:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    INSERT INTO metadata(key, value)
+                    VALUES(?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                ''', (key, value))
+                await db.commit()
+                return True
+        except Exception as e:
+            print(f"Erro ao salvar metadata {key}: {e}")
             return False
 
 # Instância global

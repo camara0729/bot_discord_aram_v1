@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils.database_manager import db_manager
+import config
 
 class RankingCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -20,18 +21,26 @@ class RankingCog(commands.Cog):
             await interaction.followup.send("Nenhum jogador registrado ainda. Use `/registrar` para começar!")
             return
             
-        embed = discord.Embed(title="🏆 Ranking de PDL - ARAM Scrim Master 🏆", color=discord.Color.purple())
+        embed = discord.Embed(
+            title="🏆 Ranking de PDL - ARAM Scrim Master 🏆",
+            color=discord.Color.purple()
+        )
         
         description = ""
-        for i, player in enumerate(all_players[:20]): # Limita a exibição aos top 20
-            rank_emoji = {0: "🥇", 1: "🥈", 2: "🥉"}.get(i, f"**{i+1}.**")
+        for i, player in enumerate(all_players[:20]):  # Limita a exibição aos top 20
+            rank_emoji = {0: "🥇", 1: "🥈", 2: "🥉"}.get(i, "🏅")
             user = self.bot.get_user(player['discord_id']) or await self.bot.fetch_user(player['discord_id'])
             user_name = user.display_name if user else f"ID: {player['discord_id']}"
+            elo_info = config.get_elo_by_pdl(player['pdl'])
+            position = i + 1
+            wins = player['wins']
+            losses = player['losses']
+            mvp_count = player.get('mvp_count', 0)
+            bagre_count = player.get('bagre_count', 0)
             
             description += (
-                f"{rank_emoji} **{player['pdl']} PDL** - {user_name} "
-                f"({player['wins']}V / {player['losses']}D) • "
-                f"⭐ {player.get('mvp_count', 0)} • 💩 {player.get('bagre_count', 0)}\n"
+                f"{rank_emoji} #{position} {elo_info['emoji']} **{user_name}** - {player['pdl']} PDL "
+                f"({wins}V/{losses}D) • ⭐ {mvp_count} • 💩 {bagre_count}\n"
             )
         
         embed.description = description
