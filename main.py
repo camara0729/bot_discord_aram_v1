@@ -8,11 +8,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
+import aiohttp
+from aiohttp import web
 
 from utils.database_manager import db_manager
 from utils.backup_transport import send_backup_file
 
 load_dotenv()
+
+# Configurações do Render/Web Service
+PORT = int(os.getenv('PORT', 10000))
+RENDER_URL = os.getenv('RENDER_EXTERNAL_URL', f'http://localhost:{PORT}')
 
 # Configurações do bot
 TOKEN = os.getenv('DISCORD_TOKEN') or os.getenv('DISCORD_BOT_TOKEN')
@@ -48,6 +54,9 @@ async def on_ready():
     if not periodic_backup_task.is_running():
         periodic_backup_task.start()
         print("💾 Rotina de backup remoto iniciada")
+    if not keep_alive_ping.is_running():
+        keep_alive_ping.start()
+        print("🚀 Sistema keep-alive iniciado")
 
 async def auto_migrate_if_needed():
     """Executa migração automática se backup existir e banco estiver vazio."""
@@ -187,6 +196,50 @@ async def restore_from_git_backup():
         print(f"❌ Erro ao restaurar do backup Git: {e}")
         return False
 
+async def health_check(request):
+    """Endpoint de health check para manter o serviço ativo no Render."""
+    return web.json_response({
+        'status': 'alive',
+        'bot': bot.user.name if bot.user else 'Not ready',
+        'timestamp': datetime.now().isoformat(),
+        'guilds': len(bot.guilds),
+        'uptime': 'online'
+    })
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    app.router.add_get('/ping', health_check)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    print(f"🌐 Servidor web iniciado na porta {PORT}")
+
+@tasks.loop(minutes=8)
+async def keep_alive_ping():
+    """Ping periódico para evitar hibernação no Render Free."""
+    try:
+        timeout = aiohttp.ClientTimeout(total=30, connect=15)
+        target = os.getenv('RENDER_EXTERNAL_URL') or f'http://localhost:{PORT}'
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(f"{target}/ping") as response:
+                current_time = datetime.now().strftime('%H:%M:%S')
+                if response.status == 200:
+                    print(f"✅ Keep-alive ping successful - {current_time}")
+                else:
+                    print(f"⚠️ Keep-alive ping failed ({response.status}) - {current_time}")
+    except Exception as e:
+        current_time = datetime.now().strftime('%H:%M:%S')
+        print(f"❌ Erro no keep-alive ping ({current_time}): {e}")
+
+
+@keep_alive_ping.before_loop
+async def before_keep_alive():
+    await bot.wait_until_ready()
+
 @tasks.loop(hours=1)
 async def periodic_backup_task():
     """Executa o processo de backup remoto periodicamente."""
@@ -279,7 +332,10 @@ async def main():
         # Executar migração automática se necessário (sistema legado)
         await auto_migrate_if_needed()
         
-        await bot.start(TOKEN)
+        await asyncio.gather(
+            start_web_server(),
+            bot.start(TOKEN)
+        )
             
     except KeyboardInterrupt:
         print("Bot desligado pelo usuário")

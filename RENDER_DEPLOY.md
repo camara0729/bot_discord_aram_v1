@@ -1,4 +1,4 @@
-# Deploy Guide - Render Free Tier (Worker)
+# Deploy Guide - Render Free Tier (Web Service)
 
 ## Pré-requisitos
 1. Repositório GitHub com o bot.
@@ -11,9 +11,9 @@
 ### 1. Preparar Repositório
 Certifique-se de que o código mais recente está no GitHub.
 
-### 2. Configurar Worker no Render
+### 2. Configurar Web Service no Render
 1. Acesse [render.com](https://render.com).
-2. Clique em **New +** → **Worker**.
+2. Clique em **New +** → **Web Service**.
 3. Selecione o repositório do bot.
 4. Configure:
    - **Environment**: `Python 3`
@@ -26,34 +26,36 @@ Certifique-se de que o código mais recente está no GitHub.
 |----------|-----------|-------------|
 | `DISCORD_TOKEN` | Token do bot do Discord | ✅ |
 | `RIOT_API_KEY` | Chave da Riot | ✅ |
-| `DATABASE_PATH` | Caminho do SQLite (use `/app/data/bot_database.db`) | ✅ |
+| `DATABASE_PATH` | Caminho do SQLite (`/app/data/bot_database.db`) | ✅ |
 | `BACKUP_WEBHOOK_URL` | Webhook para receber backups JSON | ✅ |
 | `BACKUP_FREQUENCY_HOURS` | Intervalo entre backups automáticos (padrão 6) | ❌ |
+| `RENDER_EXTERNAL_URL` | URL pública do serviço (defina após o primeiro deploy) | ❌ |
 
-O `render.yaml` já define o volume persistente `bot-data` montado em `/app/data`.
+O `render.yaml` monta o volume `bot-data` em `/app/data`, garantindo persistência do banco.
 
 ### 4. Deploy Inicial
-1. Clique em **Create Worker**.
-2. Aguarde a instalação e o start.
-3. Verifique nos logs:
+1. Clique em **Create Web Service**.
+2. Aguarde o build e o start.
+3. Confirme nos logs:
+   - `🌐 Servidor web iniciado...`
    - `🤖 Bot ... está online!`
    - `💾 Rotina de backup remoto iniciada`
 
 ### 5. Migração de Dados (opcional)
-- Coloque um arquivo `render_migration_backup.json` no repositório com o dump desejado.
-- O `main.py` detecta banco vazio e restaura automaticamente esse arquivo apenas uma vez.
+- Faça upload de `render_migration_backup.json` antes do deploy.
+- No primeiro start, se o banco estiver vazio, o arquivo é restaurado automaticamente e renomeado para evitar duplicidade.
 
 ## Monitoramento
-- Use `/status_backup` para confirmar webhook, caminho do banco e horário do último backup.
-- Logs do Render mostram cada envio automático de backup.
-- Como Worker, não há endpoints HTTP – monitore a presença do bot diretamente pelo Discord.
+- `/health` responde um JSON; use-o em um monitor externo (UptimeRobot) para manter o serviço acordado e detectar falhas.
+- `/status_backup` mostra webhook, caminho do banco e último backup automático.
+- Os logs exibem cada envio `✅ Backup enviado ...`.
 
 ## Recuperação
-1. Baixe o backup JSON do webhook (ex.: canal privado no Discord).
-2. Faça upload do arquivo para o repositório/volume.
-3. Use `/restaurar_backup arquivo:seuarquivo.json` ou deixe o arquivo como `render_migration_backup.json` para restauração automática.
+1. Baixe qualquer JSON do canal privado do webhook.
+2. Suba o arquivo para o Render (ou para o repositório).
+3. Use `/restaurar_backup arquivo:nome.json` ou renomeie para `render_migration_backup.json` e redeploy.
 
 ## Dicas
-- Mantenha o `DATABASE_PATH` apontando para o volume persistente para evitar perdas inesperadas.
-- Para maior confiabilidade, gere backups manuais antes de grandes alterações usando `/fazer_backup`.
-- Caso precise migrar para outra plataforma (Railway, Fly.io, etc.), basta reutilizar o Dockerfile e as mesmas variáveis.
+- Defina `RENDER_EXTERNAL_URL` logo após pegar a URL pública fornecida pelo Render; isso garante que o loop de keep-alive bata no endpoint correto.
+- Gere `/fazer_backup` manual antes de alterações grandes.
+- Para migrar para outros provedores (Railway, Fly.io etc.), reutilize o Dockerfile e as mesmas variáveis.

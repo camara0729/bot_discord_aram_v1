@@ -1,30 +1,33 @@
-# 🚀 Execução Contínua sem Keep-Alive
+# 🚀 Sistema Keep-Alive para Render Free Tier
 
-O bot agora roda como **Worker** no Render, portanto não depende mais de endpoints HTTP ou scripts externos para se manter acordado. O processo principal permanece ativo 24/7 enquanto houver horas disponíveis no plano gratuito.
+Como o plano gratuito do Render só oferece Web Services, o bot expõe um pequeno servidor HTTP e se mantém ativo pingando a própria URL.
 
-## ✔️ O que mudou
-- `render.yaml` e `Procfile` usam `type: worker`, eliminando o servidor web/`/health`.
-- O loop de keep-alive/AioHTTP foi removido do `main.py`; apenas o Discord bot é iniciado.
-- Nenhuma chamada externa periódica é necessária para evitar hibernação.
+## Como funciona
+1. **Servidor HTTP interno** (`aiohttp`)
+   - Endpoints `/`, `/health` e `/ping` respondem com o status do bot.
+   - Necessário para o Render detectar que o processo está ouvindo a porta definida em `PORT`.
+2. **Loop de keep-alive**
+   - A cada 8 minutos o bot faz `GET` em `RENDER_EXTERNAL_URL/ping` (ou `localhost:PORT` em desenvolvimento).
+   - Isso evita que o Render hiberne o serviço por inatividade.
+3. **Monitor externo (recomendado)**
+   - Configure algo como UptimeRobot para bater em `/health` a cada 5 minutos. Assim você recebe alertas caso o serviço caia e reforça o keep-alive.
 
-## 📦 Como configurar no Render
-1. Crie um serviço **Worker** apontando para este repositório.
+## Configuração no Render
+1. Serviço do tipo **Web**.
 2. Build command: `pip install -r requirements.txt`
 3. Start command: `python main.py`
-4. Configure as variáveis obrigatórias:
+4. Variáveis obrigatórias:
    - `DISCORD_TOKEN`
    - `RIOT_API_KEY`
-   - `DATABASE_PATH=/app/data/bot_database.db` (usa o disco persistente)
-   - `BACKUP_WEBHOOK_URL` (para envio automático dos backups JSON)
+   - `DATABASE_PATH=/app/data/bot_database.db`
+   - `BACKUP_WEBHOOK_URL`
+   - O Render preenche `PORT` automaticamente; após o primeiro deploy copie a URL e defina `RENDER_EXTERNAL_URL` para ela.
 
-O Worker não expõe portas, portanto nenhum health-check HTTP é necessário.
+## Testando
+- Abra `https://seu-app.onrender.com/health` no navegador; você deve ver o JSON de status.
+- Verifique os logs: `🌐 Servidor web iniciado...` e `✅ Keep-alive ping successful ...` indicam que o loop está rodando.
 
-## 🔎 Monitoramento opcional
-Se quiser visibilidade adicional:
-- Use um canal privado do Discord para receber logs do Render (Streaming logs).
-- Configure alertas do próprio Discord (Status > Incident) ou monitores que chequem a presença do bot via API (`discord.py` já loga reconexões).
+## Scripts externos
+O `external_pinger.py` permanece opcional. Use-o apenas se quiser um segundo ping rodando fora do Render (por exemplo, em outra VPS).
 
-## 🧹 E o antigo `external_pinger.py`?
-Esse script tornou-se opcional e pode ser removido. Ele só faz sentido se você hospedar o bot como Web Service em outro provedor.
-
-Com esse ajuste, o bot permanece on-line continuamente sem depender de gambiarras de keep-alive. 🎉
+Com esse setup o bot continua compatível com o plano gratuito, mantém a porta obrigatória aberta e reduz o risco de hibernação inesperada. ✅
