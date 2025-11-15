@@ -7,20 +7,20 @@ import config
 
 class DatabaseManager:
     def __init__(self, db_path: str = None):
-        self.db_path = db_path or os.getenv('DATABASE_PATH', 'bot_database.db')
-        parent = Path(self.db_path).parent
-        if str(parent) not in ('.', ''):
-            missing = []
-            current = parent
-            while not current.exists() and current != current.parent:
-                missing.append(current)
-                current = current.parent
-            for directory in reversed(missing):
-                try:
-                    directory.mkdir(exist_ok=True)
-                except PermissionError:
-                    if not directory.exists():
-                        raise
+        configured_path = db_path or os.getenv('DATABASE_PATH', 'bot_database.db')
+        self.db_path = configured_path
+
+        parent = Path(configured_path).parent
+        if str(parent) not in ('.', '') and not parent.exists():
+            try:
+                parent.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                fallback = Path('bot_database.db')
+                print(
+                    f"⚠️ Permissão negada ao criar '{parent}'. "
+                    f"Usando caminho alternativo '{fallback.resolve()}'"
+                )
+                self.db_path = str(fallback)
 
     async def initialize_database(self):
         """Inicializa o banco de dados e cria as tabelas necessárias."""
