@@ -26,6 +26,7 @@
 - (Opcional) `RENDER_EXTERNAL_URL` – usado pelo keep-alive
 - `OPS_WEBHOOK_URL` – webhook privado que recebe os eventos estruturados de observabilidade.
 - `FAIRPLAY_LIMIT` / `FAIRPLAY_TIMEOUT_MINUTES` – valores padrão para incidentes ativos e tempo de bloqueio antes de impedir novas participações.
+- (Opcional) `BADGE_QUEUE_ROLE`, `BADGE_RANK_ROLE` não são necessários – roles são configuradas via `/badges configurar`.
 
 ## Observações Queue+
 - Cada guild pode manter múltiplas filas simultâneas.
@@ -62,3 +63,9 @@
 - `/fairplay listar jogador` mostra histórico e `/fairplay resolver incidente_id:123` encerra incidentes em aberto. `/fairplay configurar limite:3 timeout_minutos:45` permite customizar por guild.
 - Jogadores bloqueados recebem mensagem no canal público e DM (quando possível), e qualquer tentativa de entrar em filas ou usar `/times` é recusada com aviso.
 - Métricas `fairplay_incidents`, `fairplay_penalties_applied` e `fairplay_resolved` são registradas para auditoria.
+
+## Exportação Pública do Ranking
+- Admins podem executar `/ranking_publicar canal:#ranking` para fixar um embed no canal escolhido. O bot edita essa mensagem automaticamente a cada hora (sem flood) mostrando Top 10, variação de PDL e carimbo horário.
+- O endpoint HTTP `https://<sua-url>/public/ranking.json` expõe o ranking atual em JSON (campos `position`, `riot_id`, `lol_rank`, `pdl`, etc.). O endpoint inclui `Access-Control-Allow-Origin: *` para facilitar consumo por sites externos.
+- Métricas `ranking_embeds_updated`, `ranking_command_used` e `ranking_endpoint_hits` são registradas em `metadata`.
+- Para testar localmente, use `./venv/bin/python scripts/test_ranking_export.py` ou acesse `http://localhost:PORT/public/ranking.json` após iniciar o bot.
