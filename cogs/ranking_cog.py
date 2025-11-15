@@ -29,8 +29,16 @@ class RankingCog(commands.Cog):
         description = ""
         for i, player in enumerate(all_players[:20]):  # Limita a exibição aos top 20
             rank_emoji = {0: "🥇", 1: "🥈", 2: "🥉"}.get(i, "🏅")
-            user = self.bot.get_user(player['discord_id']) or await self.bot.fetch_user(player['discord_id'])
-            user_name = user.display_name if user else f"ID: {player['discord_id']}"
+            riot_name = player.get('riot_id') or player.get('username')
+            if not riot_name:
+                user = self.bot.get_user(player['discord_id'])
+                if not user:
+                    try:
+                        user = await self.bot.fetch_user(player['discord_id'])
+                    except Exception:
+                        user = None
+                riot_name = user.display_name if user else f"ID: {player['discord_id']}"
+
             elo_info = config.get_elo_by_pdl(player['pdl'])
             position = i + 1
             wins = player['wins']
@@ -39,7 +47,7 @@ class RankingCog(commands.Cog):
             bagre_count = player.get('bagre_count', 0)
             
             description += (
-                f"{rank_emoji} #{position} {elo_info['emoji']} **{user_name}** - {player['pdl']} PDL "
+                f"{rank_emoji} #{position} {elo_info['emoji']} **{riot_name}** - {player['pdl']} PDL "
                 f"({wins}V/{losses}D) • ⭐ {mvp_count} • 💩 {bagre_count}\n"
             )
         
