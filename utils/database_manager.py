@@ -95,7 +95,34 @@ class DatabaseManager:
                     value TEXT
                 )
             ''')
-            
+
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS queues (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER,
+                    name TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    slots INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'aberta',
+                    created_by INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(guild_id, name)
+                )
+            ''')
+
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS queue_players (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    queue_id INTEGER NOT NULL,
+                    discord_id INTEGER NOT NULL,
+                    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(queue_id, discord_id),
+                    FOREIGN KEY(queue_id) REFERENCES queues(id) ON DELETE CASCADE
+                )
+            ''')
+
             await db.commit()
             print("Banco de dados inicializado com sucesso!")
 
@@ -357,6 +384,113 @@ class DatabaseManager:
         except Exception as e:
             print(f"Erro ao atualizar username: {e}")
             return False
+
+    async def create_queue(self, guild_id: int, channel_id: int, message_id: int, name: str, mode: str, slots: int, created_by: int) -> int:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute('''
+                    INSERT INTO queues (guild_id, channel_id, message_id, name, mode, slots, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (guild_id, channel_id, message_id, name, mode, slots, created_by))
+                await db.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            print(f"Erro ao criar fila: {e}")
+            raise
+
+    async def update_queue_message(self, queue_id: int, message_id: int) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('UPDATE queues SET message_id = ? WHERE id = ?', (message_id, queue_id))
+            await db.commit()
+
+    async def get_queue(self, queue_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute('SELECT * FROM queues WHERE id = ?', (queue_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    return dict(row) if row else None
+        except Exception as e:
+            print(f"Erro ao buscar fila: {e}")
+            return None
+
+    async def get_queue_by_name(self, guild_id: int, name: str) -> Optional[Dict[str, Any]]:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute('SELECT * FROM queues WHERE guild_id = ? AND name = ?', (guild_id, name)) as cursor:
+                    row = await cursor.fetchone()
+                    return dict(row) if row else None
+        except Exception as e:
+            print(f"Erro ao buscar fila por nome: {e}")
+            return None
+
+    async def get_active_queues(self, guild_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        query = 'SELECT * FROM queues WHERE status = "aberta"'
+        params: tuple[Any, ...] = ()
+        if guild_id:
+            query += ' AND guild_id = ?'
+            params = (guild_id,)
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(query, params) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Erro ao listar filas ativas: {e}")
+            return []
+
+    async def add_player_to_queue(self, queue_id: int, discord_id: int) -> bool:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    INSERT INTO queue_players (queue_id, discord_id) VALUES (?, ?)
+                ''', (queue_id, discord_id))
+                await db.commit()
+                return True
+        except aiosqlite.IntegrityError:
+            return False
+        except Exception as e:
+            print(f"Erro ao adicionar jogador à fila: {e}")
+            return False
+
+    async def remove_player_from_queue(self, queue_id: int, discord_id: int) -> bool:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute('DELETE FROM queue_players WHERE queue_id = ? AND discord_id = ?', (queue_id, discord_id))
+                await db.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Erro ao remover jogador da fila: {e}")
+            return False
+
+    async def get_queue_players(self, queue_id: int) -> List[int]:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute('SELECT discord_id FROM queue_players WHERE queue_id = ? ORDER BY joined_at', (queue_id,)) as cursor:
+                    rows = await cursor.fetchall()
+                    return [row[0] for row in rows]
+        except Exception as e:
+            print(f"Erro ao buscar jogadores da fila: {e}")
+            return []
+
+    async def update_queue_status(self, queue_id: int, status: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('UPDATE queues SET status = ? WHERE id = ?', (status, queue_id))
+            await db.commit()
+
+    async def increment_metadata_counter(self, key: str) -> None:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    INSERT INTO metadata(key, value)
+                    VALUES(?, '1')
+                    ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1
+                ''', (key,))
+                await db.commit()
+        except Exception as e:
+            print(f"Erro ao incrementar contador {key}: {e}")
 
     async def reset_all_pdl(self, new_pdl: int = config.DEFAULT_PDL) -> int:
         """Define o PDL de todos os jogadores para um valor específico."""

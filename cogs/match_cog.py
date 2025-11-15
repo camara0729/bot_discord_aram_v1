@@ -68,6 +68,7 @@ class MatchCog(commands.Cog):
             
             # Atualizar estatísticas dos jogadores
             pdl_changes = {}
+            participants_context = {'blue': [], 'red': []}
             
             # Processar vencedores
             for player in winners:
@@ -89,6 +90,7 @@ class MatchCog(commands.Cog):
                     pdl_change += config.BAGRE_PENALTY
                 
                 pdl_changes[player.id] = pdl_change
+                participants_context['blue' if vencedor == 'azul' else 'red'].append(player.id)
             
             # Processar perdedores
             for player in losers:
@@ -110,7 +112,24 @@ class MatchCog(commands.Cog):
                     pdl_change += config.BAGRE_PENALTY
                 
                 pdl_changes[player.id] = pdl_change
+                participants_context['red' if vencedor == 'azul' else 'blue'].append(player.id)
             
+            match_id = await db_manager.create_match(
+                guild_id=interaction.guild_id,
+                blue_team=participants_context['blue'],
+                red_team=participants_context['red'],
+                winner=vencedor,
+                mvp_id=mvp.id if mvp else None,
+                bagre_id=bagre.id if bagre else None,
+                pdl_changes=pdl_changes
+            )
+
+            await db_manager.add_match_participants(
+                match_id,
+                blue_team=[player.id for player in blue_players],
+                red_team=[player.id for player in red_players]
+            )
+
             # Criar embed de resultado
             embed = discord.Embed(
                 title="🏆 Partida Registrada!",
@@ -158,6 +177,7 @@ class MatchCog(commands.Cog):
             embed.set_footer(text="Use /ranking para ver o ranking atualizado!")
             
             await interaction.followup.send(embed=embed)
+            print(f"📘 Partida registrada (match_id={match_id})")
             
         except Exception as e:
             print(f"Erro ao registrar partida: {e}")
