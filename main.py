@@ -229,11 +229,39 @@ async def health_check(request):
         'uptime': 'online'
     })
 
+async def public_ranking(request):
+    try:
+        limit = int(request.rel_url.query.get('limit', '20'))
+    except ValueError:
+        limit = 20
+    limit = max(1, min(limit, 50))
+    ranking = await db_manager.get_ranking_snapshot(limit)
+    data = []
+    for position, player in enumerate(ranking, 1):
+        data.append({
+            'position': position,
+            'discord_id': player['discord_id'],
+            'riot_id': player.get('riot_id'),
+            'lol_rank': player.get('lol_rank'),
+            'pdl': player['pdl'],
+            'wins': player['wins'],
+            'losses': player['losses'],
+            'mvp_count': player.get('mvp_count', 0),
+            'bagre_count': player.get('bagre_count', 0)
+        })
+    updated_at = await db_manager.get_metadata('ranking_last_update_0') or datetime.utcnow().isoformat()
+    payload = {'updated_at': updated_at, 'players': data}
+    response = web.json_response(payload)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    await db_manager.increment_metadata_counter('ranking_endpoint_hits')
+    return response
+
 async def start_web_server():
     app = web.Application()
     app.router.add_get('/', health_check)
     app.router.add_get('/health', health_check)
     app.router.add_get('/ping', health_check)
+    app.router.add_get('/public/ranking.json', public_ranking)
 
     runner = web.AppRunner(app)
     await runner.setup()
