@@ -265,6 +265,17 @@ class DatabaseManager:
             print(f"Erro ao buscar todos os jogadores: {e}")
             return []
 
+    async def get_ranking_snapshot(self, limit: int = 20) -> List[Dict[str, Any]]:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute('SELECT * FROM players ORDER BY pdl DESC LIMIT ?', (limit,)) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Erro ao obter snapshot do ranking: {e}")
+            return []
+
     async def update_player_stats(self, discord_id: int, won: bool, is_mvp: bool = False, is_bagre: bool = False) -> bool:
         """
         Atualiza as estatísticas de um jogador após uma partida.
