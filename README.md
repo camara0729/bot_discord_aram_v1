@@ -11,6 +11,7 @@
 - `/historico_configurar_cartao` / `/historico_enviar_cartao` – comandos administrativos para definir o canal e disparar o cartão semanal de destaques.
 - `/temporada_iniciar` / `/temporada_finalizar` – comandos administrativos para resetar o ranking com snapshots e bloquear partidas entre temporadas.
 - `/sincronizar_elo` – consulta a Riot API e atualiza o rank armazenado no banco.
+- `/fairplay registrar/resolver/listar/configurar` – administradores gerenciam incidentes de fair play e bloqueios automáticos.
 
 ## Permissões
 - Comandos `/fila criar` e `/fila cancelar` exigem permissão de administrador na guild (verificado antes de criar a fila).
@@ -23,6 +24,7 @@
 - `BACKUP_WEBHOOK_URL`
 - (Opcional) `RENDER_EXTERNAL_URL` – usado pelo keep-alive
 - `OPS_WEBHOOK_URL` – webhook privado que recebe os eventos estruturados de observabilidade.
+- `FAIRPLAY_LIMIT` / `FAIRPLAY_TIMEOUT_MINUTES` – valores padrão para incidentes ativos e tempo de bloqueio antes de impedir novas participações.
 
 ## Observações Queue+
 - Cada guild pode manter múltiplas filas simultâneas.
@@ -53,3 +55,9 @@
 - Jogadores usam `/sincronizar_elo` para atualizar o campo `lol_rank`. O comando busca o Riot ID salvo, converte o tier para o formato interno (ex.: `OURO IV`) e registra o momento da sincronização.
 - Um job automático (`rank_auto_sync`) roda diariamente e sincroniza até 5 jogadores que estão há mais de 7 dias sem atualizar o elo. Métricas `rank_sync_manual`, `rank_sync_auto` e `rank_sync_percent_30d` ajudam a monitorar a adoção.
 - Caso a API esteja indisponível, os erros são reportados no webhook de observabilidade (`riot.sync_failed`) e o bot tenta novamente no próximo ciclo.
+
+## Penalidades & Fair Play
+- Use `/fairplay registrar jogador:@nick motivo:"ausencia" descrição:"Não apareceu"` para registrar incidentes. Após atingir o limite (`FAIRPLAY_LIMIT`, padrão 3), o bot aplica bloqueio automático por `FAIRPLAY_TIMEOUT_MINUTES` (padrão 30) em filas e geração de times.
+- `/fairplay listar jogador` mostra histórico e `/fairplay resolver incidente_id:123` encerra incidentes em aberto. `/fairplay configurar limite:3 timeout_minutos:45` permite customizar por guild.
+- Jogadores bloqueados recebem mensagem no canal público e DM (quando possível), e qualquer tentativa de entrar em filas ou usar `/times` é recusada com aviso.
+- Métricas `fairplay_incidents`, `fairplay_penalties_applied` e `fairplay_resolved` são registradas para auditoria.

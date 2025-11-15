@@ -292,6 +292,7 @@ async def load_cogs():
         'queue_cog',
         'season_cog',
         'history_cog',
+        'fairplay_cog',
     ]
     
     for cog_name in cog_files:

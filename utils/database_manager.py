@@ -152,6 +152,22 @@ class DatabaseManager:
                 )
             ''')
 
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS fairplay_incidents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    discord_id INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT NOT NULL DEFAULT 'aberto',
+                    penalty_until TIMESTAMP,
+                    created_by INTEGER,
+                    resolved_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP
+                )
+            ''')
+
             # Garantir colunas extras após upgrades
             async with db.execute("PRAGMA table_info(matches)") as cursor:
                 columns = await cursor.fetchall()
@@ -504,6 +520,92 @@ class DatabaseManager:
         except Exception as e:
             print(f"Erro ao contar jogadores: {e}")
             return 0
+
+    async def add_fairplay_incident(self, guild_id: int, discord_id: int, reason: str, description: str, created_by: int, penalty_until: Optional[str] = None) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute('''
+                INSERT INTO fairplay_incidents (guild_id, discord_id, reason, description, created_by, penalty_until)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (guild_id, discord_id, reason, description, created_by, penalty_until))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def set_incident_penalty(self, incident_id: int, penalty_until: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                UPDATE fairplay_incidents
+                SET penalty_until = ?, status = 'aberto'
+                WHERE id = ?
+            ''', (penalty_until, incident_id))
+            await db.commit()
+
+    async def resolve_fairplay_incident(self, incident_id: int, resolved_by: int) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute('''
+                UPDATE fairplay_incidents
+                SET status = 'resolvido', resolved_by = ?, resolved_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'aberto'
+            ''', (resolved_by, incident_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def list_fairplay_incidents(self, guild_id: int, discord_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute('''
+                SELECT * FROM fairplay_incidents
+                WHERE guild_id = ? AND discord_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            ''', (guild_id, discord_id, limit)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def count_active_incidents(self, guild_id: int, discord_id: int) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute('''
+                SELECT COUNT(*) FROM fairplay_incidents
+                WHERE guild_id = ? AND discord_id = ? AND status = 'aberto'
+            ''', (guild_id, discord_id)) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
+
+    async def get_penalty_info(self, guild_id: int, discord_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute('''
+                SELECT * FROM fairplay_incidents
+                WHERE guild_id = ? AND discord_id = ? AND status = 'aberto' AND penalty_until IS NOT NULL
+                ORDER BY penalty_until DESC
+                LIMIT 1
+            ''', (guild_id, discord_id)) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def is_player_under_penalty(self, guild_id: int, discord_id: int) -> Optional[Dict[str, Any]]:
+        penalty = await self.get_penalty_info(guild_id, discord_id)
+        if not penalty:
+            return None
+        from datetime import datetime
+        penalty_until = penalty.get('penalty_until')
+        if not penalty_until:
+            return None
+        try:
+            end_time = datetime.fromisoformat(penalty_until)
+        except ValueError:
+            return None
+        if end_time > datetime.utcnow():
+            return {'penalty_until': penalty_until, 'incident_id': penalty['id']}
+        else:
+            # penalty expired; clear field
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE fairplay_incidents
+                    SET penalty_until = NULL
+                    WHERE id = ?
+                ''', (penalty['id'],))
+                await db.commit()
+            return None
 
     async def bulk_reset_player_stats(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:

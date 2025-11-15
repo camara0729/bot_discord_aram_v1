@@ -21,6 +21,10 @@ class TeamCog(commands.Cog):
         if participantes not in [4, 6, 8, 10]:
             await interaction.response.send_message("❌ Número de participantes deve ser 4, 6, 8 ou 10!", ephemeral=True)
             return
+        penalty_msg = await self._check_member_penalty(interaction.guild_id, interaction.user)
+        if penalty_msg:
+            await interaction.response.send_message(penalty_msg, ephemeral=True)
+            return
         
         # Criar embed inicial
         embed = discord.Embed(
@@ -58,6 +62,10 @@ class TeamCog(commands.Cog):
             # Buscar dados dos jogadores
             players_data = []
             for player in player_list:
+                msg = await self._check_member_penalty(interaction.guild_id, player)
+                if msg:
+                    await interaction.followup.send(msg)
+                    return
                 player_data = await db_manager.get_player(player.id)
                 if not player_data:
                     await interaction.followup.send(f"❌ {player.mention} não está registrado! Use `/registrar` primeiro.")
@@ -236,6 +244,12 @@ class TeamCog(commands.Cog):
         else:
             return {"emoji": "🔴", "text": "Desbalanceado"}
 
+    async def _check_member_penalty(self, guild_id: int, member: discord.Member) -> Optional[str]:
+        fairplay = self.bot.get_cog('FairPlayCog')
+        if not fairplay:
+            return None
+        return await fairplay.check_penalty(guild_id, member)
+
 class TeamActionsView(discord.ui.View):
     def __init__(self, blue_team: List[Dict], red_team: List[Dict]):
         super().__init__(timeout=300)
@@ -288,6 +302,13 @@ class ParticipantSelectionView(discord.ui.View):
         if user.id in [p.id for p in self.participants]:
             await interaction.response.send_message("❌ Você já está na lista de participantes!", ephemeral=True)
             return
+
+        fairplay = interaction.client.get_cog('FairPlayCog')
+        if fairplay:
+            msg = await fairplay.check_penalty(interaction.guild_id, user)
+            if msg:
+                await interaction.response.send_message(msg, ephemeral=True)
+                return
             
         # Verificar se está registrado
         player_data = await db_manager.get_player(user.id)
@@ -380,6 +401,12 @@ class ParticipantSelectionView(discord.ui.View):
         try:
             players_data = []
             for player in self.participants:
+                fairplay = interaction.client.get_cog('FairPlayCog')
+                if fairplay:
+                    msg = await fairplay.check_penalty(interaction.guild_id, player)
+                    if msg:
+                        await interaction.followup.send(msg, ephemeral=True)
+                        return
                 player_data = await db_manager.get_player(player.id)
                 if not player_data:
                     await interaction.followup.send(f"❌ {player.mention} não está registrado!", ephemeral=True)
