@@ -1,16 +1,22 @@
 # cogs/player_cog.py
+import asyncio
 import discord
 from discord import app_commands
-from discord.ext import commands
-from typing import Optional
+from discord.ext import commands, tasks
+from typing import Optional, Dict
 
 from utils.database_manager import db_manager
 from utils.riot_api_manager import riot_api_manager
+from utils.ops_logger import log_ops_event, format_exception
 import config
 
 class PlayerCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.rank_auto_sync.start()
+
+    def cog_unload(self):
+        self.rank_auto_sync.cancel()
 
     @app_commands.command(name="registrar", description="Registre seu Riot ID para participar das scrims.")
     @app_commands.describe(
@@ -122,6 +128,100 @@ class PlayerCog(commands.Cog):
         embed.add_field(name="💩 Bagres", value=f"**{player_data['bagre_count']}**", inline=True)
         
         await interaction.response.send_message(embed=embed)
+
+    async def _sync_player_rank(self, player_data: Dict, source: str):
+        try:
+            puuid = player_data.get('puuid')
+            if not puuid or puuid == 'manual_puuid':
+                puuid = await self._fetch_puuid(player_data)
+                if not puuid:
+                    return False, "❌ Não foi possível obter seu PUUID. Verifique o Riot ID no `/registrar`.", {}
+                await db_manager.update_player_puuid(player_data['discord_id'], puuid)
+
+            platform = self._platform_from_riot_id(player_data.get('riot_id'))
+            rank_info = await riot_api_manager.get_rank_for_puuid(puuid, platform)
+            if not rank_info:
+                return False, "⚠️ Não encontramos partidas ranqueadas recentes para sincronizar.", {}
+
+            await db_manager.update_player_rank_sync(player_data['discord_id'], rank_info['rank'], source)
+            return True, "Sincronização realizada.", rank_info
+
+        except Exception as exc:
+            await log_ops_event(
+                'riot.sync_failed',
+                guild_id=None,
+                user_id=player_data.get('discord_id'),
+                details={'source': source},
+                stacktrace=format_exception(exc)
+            )
+            return False, "❌ Ocorreu um erro durante a sincronização. Tente novamente mais tarde.", {}
+
+    async def _fetch_puuid(self, player_data: Dict) -> Optional[str]:
+        riot_id = player_data.get('riot_id')
+        if not riot_id or '#' not in riot_id:
+            return None
+        game_name, tag_line = riot_id.split('#', 1)
+        return await riot_api_manager.get_puuid_by_riot_id(game_name, tag_line)
+
+    def _platform_from_riot_id(self, riot_id: Optional[str]) -> str:
+        if riot_id and '#' in riot_id:
+            tag = riot_id.split('#', 1)[1].lower()
+            return tag if tag else 'br1'
+        return 'br1'
+
+    @tasks.loop(hours=24)
+    async def rank_auto_sync(self):
+        await self.bot.wait_until_ready()
+        players = await db_manager.get_players_needing_rank_sync(days=7, limit=5)
+        if not players:
+            return
+        for player in players:
+            success, _, rank_info = await self._sync_player_rank(player, source='auto')
+            if success:
+                await db_manager.increment_metadata_counter('rank_sync_auto')
+            await asyncio.sleep(2)
+        percent = await self._calculate_sync_percent()
+        if percent is not None:
+            await db_manager.set_metadata('rank_sync_percent_30d', f"{percent:.2f}")
+
+    async def _calculate_sync_percent(self) -> Optional[float]:
+        total = await db_manager.count_players()
+        if total == 0:
+            return None
+        recent = await db_manager.count_players_synced_since(30)
+        return (recent / total) * 100
+
+    @rank_auto_sync.before_loop
+    async def before_rank_auto_sync(self):
+        await self.bot.wait_until_ready()
+
+    @app_commands.command(name="sincronizar_elo", description="Sincroniza seu elo direto da Riot")
+    @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
+    async def sincronizar_elo(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        player_data = await db_manager.get_player(interaction.user.id)
+        if not player_data:
+            await interaction.followup.send("❌ Você precisa se registrar primeiro com `/registrar`.")
+            return
+
+        success, message, rank_info = await self._sync_player_rank(player_data, source='manual')
+        if not success:
+            await interaction.followup.send(message)
+            return
+
+        embed = discord.Embed(
+            title="🔁 Sincronização de Elo",
+            description=f"Riot ID: **{player_data['riot_id']}**",
+            color=discord.Color.blurple()
+        )
+        embed.add_field(name="Rank atualizado", value=rank_info['rank'], inline=True)
+        if rank_info.get('lp') is not None:
+            embed.add_field(name="LP", value=f"{rank_info['lp']} LP", inline=True)
+        if rank_info.get('queue'):
+            embed.add_field(name="Fila", value=rank_info['queue'], inline=True)
+        await interaction.followup.send(embed=embed)
+        await db_manager.increment_metadata_counter('rank_sync_manual')
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(PlayerCog(bot))

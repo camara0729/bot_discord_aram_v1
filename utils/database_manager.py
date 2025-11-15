@@ -40,6 +40,8 @@ class DatabaseManager:
                     losses INTEGER DEFAULT 0,
                     mvp_count INTEGER DEFAULT 0,
                     bagre_count INTEGER DEFAULT 0,
+                    last_rank_sync_at TIMESTAMP,
+                    rank_sync_source TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -55,6 +57,10 @@ class DatabaseManager:
                 if 'username' not in column_names:
                     await db.execute('ALTER TABLE players ADD COLUMN username TEXT')
                     print("Coluna username adicionada à tabela players")
+                if 'last_rank_sync_at' not in column_names:
+                    await db.execute('ALTER TABLE players ADD COLUMN last_rank_sync_at TIMESTAMP')
+                if 'rank_sync_source' not in column_names:
+                    await db.execute('ALTER TABLE players ADD COLUMN rank_sync_source TEXT')
             
             # Tabela de partidas
             await db.execute('''
@@ -428,6 +434,76 @@ class DatabaseManager:
         except Exception as e:
             print(f"Erro ao atualizar username: {e}")
             return False
+
+    async def update_player_puuid(self, discord_id: int, puuid: str) -> bool:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players
+                    SET puuid = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (puuid, discord_id))
+                await db.commit()
+                return True
+        except Exception as e:
+            print(f"Erro ao atualizar puuid: {e}")
+            return False
+
+    async def update_player_rank_sync(self, discord_id: int, new_rank: str, source: str) -> bool:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    UPDATE players
+                    SET lol_rank = ?,
+                        last_rank_sync_at = CURRENT_TIMESTAMP,
+                        rank_sync_source = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE discord_id = ?
+                ''', (new_rank, source, discord_id))
+                await db.commit()
+                return True
+        except Exception as e:
+            print(f"Erro ao atualizar rank sincronizado: {e}")
+            return False
+
+    async def get_players_needing_rank_sync(self, days: int = 7, limit: int = 5) -> List[Dict[str, Any]]:
+        query = '''
+            SELECT * FROM players
+            WHERE last_rank_sync_at IS NULL
+               OR last_rank_sync_at < datetime('now', ?)
+            ORDER BY COALESCE(last_rank_sync_at, 0) ASC
+            LIMIT ?
+        '''
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(query, (f'-{int(days)} days', limit)) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Erro ao buscar jogadores para sync: {e}")
+            return []
+
+    async def count_players_synced_since(self, days: int = 30) -> int:
+        query = "SELECT COUNT(*) FROM players WHERE last_rank_sync_at >= datetime('now', ?)"
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(query, (f'-{int(days)} days',)) as cursor:
+                    row = await cursor.fetchone()
+                    return row[0] if row else 0
+        except Exception as e:
+            print(f"Erro ao contar sincronizações recentes: {e}")
+            return 0
+
+    async def count_players(self) -> int:
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute('SELECT COUNT(*) FROM players') as cursor:
+                    row = await cursor.fetchone()
+                    return row[0] if row else 0
+        except Exception as e:
+            print(f"Erro ao contar jogadores: {e}")
+            return 0
 
     async def bulk_reset_player_stats(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:

@@ -10,6 +10,7 @@
 - `/historico` – mostra histórico dos últimos N dias com streak, média de PDL e destaques.
 - `/historico_configurar_cartao` / `/historico_enviar_cartao` – comandos administrativos para definir o canal e disparar o cartão semanal de destaques.
 - `/temporada_iniciar` / `/temporada_finalizar` – comandos administrativos para resetar o ranking com snapshots e bloquear partidas entre temporadas.
+- `/sincronizar_elo` – consulta a Riot API e atualiza o rank armazenado no banco.
 
 ## Permissões
 - Comandos `/fila criar` e `/fila cancelar` exigem permissão de administrador na guild (verificado antes de criar a fila).
@@ -46,3 +47,9 @@
 - Há fallback local (`.ops_event_queue.jsonl`) caso o webhook esteja indisponível; ao restaurar a conectividade, os eventos pendentes são reenviados.
 - Métricas `ops_events_total`, `ops_events_sent`, `ops_events_failed` são armazenadas na tabela `metadata` para auditoria.
 - Para testar a configuração, execute `python utils/ops_logger.py` após definir `OPS_WEBHOOK_URL`; o script gera um evento de prova e informa se foi enfileirado.
+
+## Integração Riot Elo
+- O bot usa `RIOT_API_KEY` para consultar a Riot API (account → summoner → league). A chave pode ser obtida no [Portal do Desenvolvedor Riot](https://developer.riotgames.com/); lembre-se de renovar periodicamente e respeitar os limites (20 req/seg global / 100 req/2min).
+- Jogadores usam `/sincronizar_elo` para atualizar o campo `lol_rank`. O comando busca o Riot ID salvo, converte o tier para o formato interno (ex.: `OURO IV`) e registra o momento da sincronização.
+- Um job automático (`rank_auto_sync`) roda diariamente e sincroniza até 5 jogadores que estão há mais de 7 dias sem atualizar o elo. Métricas `rank_sync_manual`, `rank_sync_auto` e `rank_sync_percent_30d` ajudam a monitorar a adoção.
+- Caso a API esteja indisponível, os erros são reportados no webhook de observabilidade (`riot.sync_failed`) e o bot tenta novamente no próximo ciclo.
