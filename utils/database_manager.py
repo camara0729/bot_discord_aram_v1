@@ -131,6 +131,21 @@ class DatabaseManager:
                 )
             ''')
 
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS season_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    season_name TEXT NOT NULL,
+                    discord_id INTEGER NOT NULL,
+                    riot_id TEXT,
+                    pdl INTEGER,
+                    wins INTEGER,
+                    losses INTEGER,
+                    mvp_count INTEGER,
+                    bagre_count INTEGER,
+                    snapshot_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
             # Garantir colunas extras após upgrades
             async with db.execute("PRAGMA table_info(matches)") as cursor:
                 columns = await cursor.fetchall()
@@ -413,6 +428,38 @@ class DatabaseManager:
         except Exception as e:
             print(f"Erro ao atualizar username: {e}")
             return False
+
+    async def bulk_reset_player_stats(self) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                UPDATE players
+                SET pdl = ?, wins = 0, losses = 0, mvp_count = 0, bagre_count = 0,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (config.DEFAULT_PDL,))
+            await db.commit()
+
+    async def save_season_history(self, season_name: str, players: List[Dict[str, Any]]) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.executemany('''
+                INSERT INTO season_history (season_name, discord_id, riot_id, pdl, wins, losses, mvp_count, bagre_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', [
+                (
+                    season_name,
+                    player['discord_id'],
+                    player.get('riot_id'),
+                    player['pdl'],
+                    player['wins'],
+                    player['losses'],
+                    player.get('mvp_count', 0),
+                    player.get('bagre_count', 0)
+                )
+                for player in players
+            ])
+            await db.commit()
+
+    async def get_full_ranking(self) -> List[Dict[str, Any]]:
+        return await self.get_all_players()
 
     async def create_match(
         self,

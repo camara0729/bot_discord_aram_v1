@@ -35,6 +35,9 @@ class MatchCog(commands.Cog):
         bagre: Optional[discord.Member] = None
     ):
         await interaction.response.defer()
+        if await self._season_locked():
+            await interaction.followup.send("⚠️ Temporada encerrada. Inicie uma nova temporada para registrar partidas.")
+            return
         
         try:
             # Processar jogadores dos times
@@ -212,6 +215,9 @@ class MatchCog(commands.Cog):
         bagre: Optional[discord.Member] = None
     ):
         await interaction.response.defer()
+        if await self._season_locked():
+            await interaction.followup.send("⚠️ Temporada encerrada. Inicie uma nova temporada para registrar partidas.")
+            return
         
         try:
             last_teams = load_last_teams(interaction.guild_id)
@@ -450,6 +456,10 @@ class MatchCog(commands.Cog):
                 unique_players.append(player)
         
         return unique_players
+
+    async def _season_locked(self) -> bool:
+        locked = await db_manager.get_metadata('season_locked')
+        return locked == '1'
 
     def _mention_player(self, guild: discord.Guild, player_id: int) -> str:
         member = guild.get_member(player_id) if guild else None
