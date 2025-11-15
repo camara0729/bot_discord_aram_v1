@@ -13,6 +13,7 @@ from aiohttp import web
 
 from utils.database_manager import db_manager
 from utils.backup_transport import send_backup_file
+from utils.ops_logger import log_ops_event, format_exception
 
 load_dotenv()
 
@@ -106,6 +107,7 @@ async def remote_backup_system(force: bool = False):
         webhook_url = os.getenv('BACKUP_WEBHOOK_URL')
         if not webhook_url:
             print("⚠️ BACKUP_WEBHOOK_URL não configurada - backup remoto inativo")
+            await log_ops_event('backup.disabled', details={'reason': 'missing_webhook'})
             return
 
         backup_frequency_hours = int(os.getenv('BACKUP_FREQUENCY_HOURS', '6'))
@@ -135,6 +137,7 @@ async def remote_backup_system(force: bool = False):
         players = await db_manager.get_all_players()
         if not players:
             print("📭 Banco vazio - backup remoto ignorado")
+            await log_ops_event('backup.skipped', details={'reason': 'no_players'})
             return
 
         from backup_restore_db import backup_database
@@ -158,9 +161,11 @@ async def remote_backup_system(force: bool = False):
                 pass
         else:
             print("⚠️ Backup criado mas não foi possível enviar ao webhook")
+            await log_ops_event('backup.failed_upload', details={'file': success_file})
 
     except Exception as e:
         print(f"❌ Erro no sistema de backup remoto: {e}")
+        await log_ops_event('backup.exception', stacktrace=format_exception(e))
 
 async def restore_from_git_backup():
     """Restaura dados do último backup Git disponível."""
@@ -249,9 +254,14 @@ async def keep_alive_ping():
                     print(f"✅ Keep-alive ping successful - {current_time}")
                 else:
                     print(f"⚠️ Keep-alive ping failed ({response.status}) - {current_time}")
+                    await log_ops_event(
+                        'keepalive.http_status',
+                        details={'status': response.status, 'time': current_time}
+                    )
     except Exception as e:
         current_time = datetime.now().strftime('%H:%M:%S')
         print(f"❌ Erro no keep-alive ping ({current_time}): {e}")
+        await log_ops_event('keepalive.exception', details={'time': current_time}, stacktrace=format_exception(e))
 
 
 @keep_alive_ping.before_loop
@@ -334,9 +344,22 @@ async def on_app_command_error(interaction: discord.Interaction, error: Exceptio
                 await interaction.response.send_message(message, ephemeral=True)
         except discord.InteractionResponded:
             pass
+        await log_ops_event(
+            event='slash.cooldown',
+            guild_id=interaction.guild_id,
+            user_id=interaction.user.id if interaction.user else None,
+            details={'command': str(interaction.command), 'retry_after': error.retry_after}
+        )
         return
 
     print(f"Erro em slash command {interaction.command}: {error}")
+    await log_ops_event(
+        event='slash.error',
+        guild_id=interaction.guild_id,
+        user_id=interaction.user.id if interaction.user else None,
+        details={'command': str(interaction.command)},
+        stacktrace=format_exception(error)
+    )
     try:
         if interaction.response.is_done():
             await interaction.followup.send("❌ Ocorreu um erro interno. Tente novamente.", ephemeral=True)

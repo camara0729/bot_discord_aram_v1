@@ -21,6 +21,7 @@
 - `DATABASE_PATH` (ex.: `/app/data/bot_database.db`)
 - `BACKUP_WEBHOOK_URL`
 - (Opcional) `RENDER_EXTERNAL_URL` – usado pelo keep-alive
+- `OPS_WEBHOOK_URL` – webhook privado que recebe os eventos estruturados de observabilidade.
 
 ## Observações Queue+
 - Cada guild pode manter múltiplas filas simultâneas.
@@ -38,3 +39,10 @@
 - `/temporada_finalizar` congela o ranking, gera um segundo snapshot e define a flag `season_locked`. Enquanto `season_locked=1`, comandos de registro de partida retornam aviso até nova temporada começar.
 - Os metadados (`season_active`, `season_name`, `season_started_at`, `season_last_finished`) ficam na tabela `metadata`. Métricas `seasons_started`/`seasons_finished` ajudam a medir recorrência.
 - Recomenda-se verificar o webhook de backup (`BACKUP_WEBHOOK_URL`) antes de executar os resets. Sem ele, os snapshots ficam apenas no sistema de arquivos.
+
+## Observabilidade via Webhook Estruturado
+- Configure `OPS_WEBHOOK_URL` com um webhook privado (ex.: canal de incidentes). O bot envia payloads JSON contendo evento, guilda, usuário, detalhes e instrução de ACK (reaja com ✅ para indicar que alguém está cuidando).
+- Eventos cobertos: erros de slash (`slash.error`), cooldowns excessivos, falhas no keep-alive (`keepalive.*`) e problemas no backup remoto (`backup.*`).
+- Há fallback local (`.ops_event_queue.jsonl`) caso o webhook esteja indisponível; ao restaurar a conectividade, os eventos pendentes são reenviados.
+- Métricas `ops_events_total`, `ops_events_sent`, `ops_events_failed` são armazenadas na tabela `metadata` para auditoria.
+- Para testar a configuração, execute `python utils/ops_logger.py` após definir `OPS_WEBHOOK_URL`; o script gera um evento de prova e informa se foi enfileirado.
