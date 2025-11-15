@@ -8,7 +8,19 @@ import config
 class DatabaseManager:
     def __init__(self, db_path: str = None):
         self.db_path = db_path or os.getenv('DATABASE_PATH', 'bot_database.db')
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        parent = Path(self.db_path).parent
+        if str(parent) not in ('.', ''):
+            missing = []
+            current = parent
+            while not current.exists() and current != current.parent:
+                missing.append(current)
+                current = current.parent
+            for directory in reversed(missing):
+                try:
+                    directory.mkdir(exist_ok=True)
+                except PermissionError:
+                    if not directory.exists():
+                        raise
 
     async def initialize_database(self):
         """Inicializa o banco de dados e cria as tabelas necessárias."""
