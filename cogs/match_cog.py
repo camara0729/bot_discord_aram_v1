@@ -68,7 +68,7 @@ class MatchCog(commands.Cog):
             
             # Atualizar estatísticas dos jogadores
             pdl_changes = {}
-            participants_context = {'blue': [], 'red': []}
+            participant_logs = []
             
             # Processar vencedores
             for player in winners:
@@ -90,7 +90,14 @@ class MatchCog(commands.Cog):
                     pdl_change += config.BAGRE_PENALTY
                 
                 pdl_changes[player.id] = pdl_change
-                participants_context['blue' if vencedor == 'azul' else 'red'].append(player.id)
+                participant_logs.append({
+                    'discord_id': player.id,
+                    'team': 'azul' if player in blue_players else 'vermelho',
+                    'result': 'win',
+                    'pdl_change': pdl_change,
+                    'is_mvp': is_mvp,
+                    'is_bagre': is_bagre
+                })
             
             # Processar perdedores
             for player in losers:
@@ -112,23 +119,27 @@ class MatchCog(commands.Cog):
                     pdl_change += config.BAGRE_PENALTY
                 
                 pdl_changes[player.id] = pdl_change
-                participants_context['red' if vencedor == 'azul' else 'blue'].append(player.id)
+                participant_logs.append({
+                    'discord_id': player.id,
+                    'team': 'azul' if player in blue_players else 'vermelho',
+                    'result': 'loss',
+                    'pdl_change': pdl_change,
+                    'is_mvp': is_mvp,
+                    'is_bagre': is_bagre
+                })
             
             match_id = await db_manager.create_match(
                 guild_id=interaction.guild_id,
-                blue_team=participants_context['blue'],
-                red_team=participants_context['red'],
+                blue_team=[player.id for player in blue_players],
+                red_team=[player.id for player in red_players],
                 winner=vencedor,
                 mvp_id=mvp.id if mvp else None,
                 bagre_id=bagre.id if bagre else None,
                 pdl_changes=pdl_changes
             )
 
-            await db_manager.add_match_participants(
-                match_id,
-                blue_team=[player.id for player in blue_players],
-                red_team=[player.id for player in red_players]
-            )
+            await db_manager.add_match_participants(match_id, participant_logs)
+            await db_manager.increment_metadata_counter('matches_registered')
 
             # Criar embed de resultado
             embed = discord.Embed(
@@ -239,6 +250,7 @@ class MatchCog(commands.Cog):
             
             # Atualizar estatísticas dos jogadores
             pdl_changes = {}
+            participant_logs = []
             
             # Processar vencedores
             for player_id in winners:
@@ -260,6 +272,14 @@ class MatchCog(commands.Cog):
                     pdl_change += config.BAGRE_PENALTY
                 
                 pdl_changes[player_id] = pdl_change
+                participant_logs.append({
+                    'discord_id': player_id,
+                    'team': 'azul' if player_id in blue_team_ids else 'vermelho',
+                    'result': 'win',
+                    'pdl_change': pdl_change,
+                    'is_mvp': is_mvp,
+                    'is_bagre': is_bagre
+                })
             
             # Processar perdedores
             for player_id in losers:
@@ -281,6 +301,14 @@ class MatchCog(commands.Cog):
                     pdl_change += config.BAGRE_PENALTY
                 
                 pdl_changes[player_id] = pdl_change
+                participant_logs.append({
+                    'discord_id': player_id,
+                    'team': 'azul' if player_id in blue_team_ids else 'vermelho',
+                    'result': 'loss',
+                    'pdl_change': pdl_change,
+                    'is_mvp': is_mvp,
+                    'is_bagre': is_bagre
+                })
             
             # Criar embed de resultado
             embed = discord.Embed(
@@ -326,9 +354,23 @@ class MatchCog(commands.Cog):
             if special_text:
                 embed.add_field(name="🎯 Destaques", value=special_text, inline=False)
             
+            match_id = await db_manager.create_match(
+                guild_id=interaction.guild_id,
+                blue_team=blue_team_ids,
+                red_team=red_team_ids,
+                winner=vencedor,
+                mvp_id=mvp.id if mvp else None,
+                bagre_id=bagre.id if bagre else None,
+                pdl_changes=pdl_changes
+            )
+
+            await db_manager.add_match_participants(match_id, participant_logs)
+            await db_manager.increment_metadata_counter('matches_registered')
+
             embed.set_footer(text="⚡ Resultado registrado rapidamente! Use /ranking para ver o ranking.")
             
             await interaction.followup.send(embed=embed)
+            print(f"⚡ Resultado rápido registrado (match_id={match_id})")
             
             # Limpar times salvos após usar
             clear_last_teams(interaction.guild.id)

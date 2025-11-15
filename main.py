@@ -280,6 +280,7 @@ async def load_cogs():
         'admin_cog',
         'ranking_cog',
         'queue_cog',
+        'history_cog',
     ]
     
     for cog_name in cog_files:

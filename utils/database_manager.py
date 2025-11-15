@@ -1,6 +1,8 @@
 # utils/database_manager.py
 import aiosqlite
 import os
+import json
+import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import config
@@ -65,6 +67,8 @@ class DatabaseManager:
                     mvp_id INTEGER,
                     bagre_id INTEGER,
                     duration INTEGER,
+                    guild_id INTEGER DEFAULT 0,
+                    pdl_summary TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (mvp_id) REFERENCES players (discord_id),
                     FOREIGN KEY (bagre_id) REFERENCES players (discord_id)
@@ -83,6 +87,10 @@ class DatabaseManager:
                     deaths INTEGER DEFAULT 0,
                     assists INTEGER DEFAULT 0,
                     damage_dealt INTEGER DEFAULT 0,
+                    result TEXT,
+                    pdl_change INTEGER DEFAULT 0,
+                    is_mvp INTEGER DEFAULT 0,
+                    is_bagre INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (discord_id) REFERENCES players (discord_id),
                     FOREIGN KEY (match_id) REFERENCES matches (match_id)
@@ -122,6 +130,27 @@ class DatabaseManager:
                     FOREIGN KEY(queue_id) REFERENCES queues(id) ON DELETE CASCADE
                 )
             ''')
+
+            # Garantir colunas extras após upgrades
+            async with db.execute("PRAGMA table_info(matches)") as cursor:
+                columns = await cursor.fetchall()
+                column_names = [column[1] for column in columns]
+                if 'guild_id' not in column_names:
+                    await db.execute('ALTER TABLE matches ADD COLUMN guild_id INTEGER DEFAULT 0')
+                if 'pdl_summary' not in column_names:
+                    await db.execute('ALTER TABLE matches ADD COLUMN pdl_summary TEXT')
+
+            async with db.execute("PRAGMA table_info(match_participants)") as cursor:
+                columns = await cursor.fetchall()
+                column_names = [column[1] for column in columns]
+                if 'result' not in column_names:
+                    await db.execute("ALTER TABLE match_participants ADD COLUMN result TEXT")
+                if 'pdl_change' not in column_names:
+                    await db.execute("ALTER TABLE match_participants ADD COLUMN pdl_change INTEGER DEFAULT 0")
+                if 'is_mvp' not in column_names:
+                    await db.execute("ALTER TABLE match_participants ADD COLUMN is_mvp INTEGER DEFAULT 0")
+                if 'is_bagre' not in column_names:
+                    await db.execute("ALTER TABLE match_participants ADD COLUMN is_bagre INTEGER DEFAULT 0")
 
             await db.commit()
             print("Banco de dados inicializado com sucesso!")
@@ -384,6 +413,95 @@ class DatabaseManager:
         except Exception as e:
             print(f"Erro ao atualizar username: {e}")
             return False
+
+    async def create_match(
+        self,
+        guild_id: int,
+        blue_team: List[int],
+        red_team: List[int],
+        winner: str,
+        mvp_id: Optional[int],
+        bagre_id: Optional[int],
+        pdl_changes: Dict[int, int],
+        duration: Optional[int] = None
+    ) -> str:
+        """Registra partida na tabela matches e retorna match_id."""
+        match_identifier = f"{guild_id}-{uuid.uuid4().hex[:8]}"
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                INSERT INTO matches (match_id, guild_id, blue_team, red_team, winner, mvp_id, bagre_id, duration, pdl_summary)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                match_identifier,
+                guild_id,
+                json.dumps(blue_team),
+                json.dumps(red_team),
+                winner,
+                mvp_id,
+                bagre_id,
+                duration,
+                json.dumps(pdl_changes)
+            ))
+            await db.commit()
+        return match_identifier
+
+    async def add_match_participants(self, match_id: str, participants: List[Dict[str, Any]]) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.executemany('''
+                INSERT INTO match_participants (match_id, discord_id, team, result, pdl_change, is_mvp, is_bagre)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', [
+                (
+                    match_id,
+                    entry['discord_id'],
+                    entry['team'],
+                    entry['result'],
+                    entry.get('pdl_change', 0),
+                    1 if entry.get('is_mvp') else 0,
+                    1 if entry.get('is_bagre') else 0
+                )
+                for entry in participants
+            ])
+            await db.commit()
+
+    async def get_recent_matches_for_player(self, discord_id: int, days: int = 30, limit: int = 20) -> List[Dict[str, Any]]:
+        query = '''
+            SELECT mp.match_id, mp.team, mp.result, mp.pdl_change, mp.is_mvp, mp.is_bagre,
+                   mp.created_at, m.winner, m.mvp_id, m.bagre_id
+            FROM match_participants mp
+            JOIN matches m ON mp.match_id = m.match_id
+            WHERE mp.discord_id = ?
+              AND mp.created_at >= datetime('now', ?)
+            ORDER BY mp.created_at DESC
+            LIMIT ?
+        '''
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(query, (discord_id, f'-{int(days)} days', limit)) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Erro ao buscar histórico do jogador {discord_id}: {e}")
+            return []
+
+    async def get_guild_recent_participation(self, guild_id: int, days: int = 7) -> List[Dict[str, Any]]:
+        query = '''
+            SELECT mp.discord_id, mp.result, mp.is_mvp, mp.pdl_change
+            FROM match_participants mp
+            JOIN matches m ON mp.match_id = m.match_id
+            WHERE m.guild_id = ?
+              AND mp.created_at >= datetime('now', ?)
+        '''
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(query, (guild_id, f'-{int(days)} days')) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Erro ao buscar histórico da guild {guild_id}: {e}")
+            return []
 
     async def create_queue(self, guild_id: int, channel_id: int, message_id: int, name: str, mode: str, slots: int, created_by: int) -> int:
         try:
