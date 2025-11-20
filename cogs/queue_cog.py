@@ -211,12 +211,6 @@ class QueueCog(commands.GroupCog, group_name="fila", group_description="Gerencie
             print(f"❌ Não foi possível localizar guild ou canal para fila {queue['name']}")
             return
 
-        team_cog = self.bot.get_cog('TeamCog')
-        if not team_cog:
-            await db_manager.update_queue_status(queue['id'], 'erro')
-            await channel.send("❌ Não foi possível montar os times: TeamCog não está carregado.")
-            return
-
         players_data = []
         members_missing = []
         for player_id in players:
@@ -251,11 +245,19 @@ class QueueCog(commands.GroupCog, group_name="fila", group_description="Gerencie
             await self._update_queue_embed(queue, players, None)
             return
 
-        blue_team, red_team = team_cog._balance_teams(players_data)
+        team_cog = self.bot.get_cog('TeamCog')
+        if team_cog:
+            blue_team, red_team = team_cog._balance_teams(players_data)
+        else:
+            blue_team, red_team = self._balance_teams_local(players_data)
         blue_avg = sum(p['balance_score'] for p in blue_team) / len(blue_team)
         red_avg = sum(p['balance_score'] for p in red_team) / len(red_team)
         difference = abs(blue_avg - red_avg)
-        balance_quality = team_cog._get_balance_quality(difference)
+        balance_quality = (
+            team_cog._get_balance_quality(difference)
+            if team_cog else
+            self._get_balance_quality_local(difference)
+        )
 
         embed = discord.Embed(
             title=f"⚔️ Fila {queue['name']} completa!",
@@ -296,6 +298,46 @@ class QueueCog(commands.GroupCog, group_name="fila", group_description="Gerencie
         await db_manager.increment_metadata_counter('queues_completed')
         await self._edit_queue_message(queue, "✅ Fila concluída! Times montados no canal.", discord.Color.dark_green(), None)
         print(f"📈 Fila {queue['name']} concluída com sucesso")
+
+    def _balance_teams_local(self, players_data: List[dict]) -> tuple[List[dict], List[dict]]:
+        """Fallback de balanceamento caso o TeamCog não esteja carregado."""
+        from itertools import combinations
+        total_players = len(players_data)
+        team_size = total_players // 2
+        if total_players < 2 or total_players % 2 != 0:
+            return players_data[:team_size], players_data[team_size:]
+
+        scores = [p['balance_score'] for p in players_data]
+        total_strength = sum(scores)
+        best_blue: List[dict] = []
+        best_red: List[dict] = []
+        best_difference = float('inf')
+
+        for combo in combinations(range(total_players), team_size):
+            if 0 not in combo:
+                continue
+            blue_team = [players_data[i] for i in combo]
+            red_team = [players_data[i] for i in range(total_players) if i not in combo]
+            blue_strength = sum(scores[i] for i in combo)
+            red_strength = total_strength - blue_strength
+            difference = abs(blue_strength - red_strength)
+            if difference < best_difference:
+                best_difference = difference
+                best_blue = blue_team
+                best_red = red_team
+                if difference == 0:
+                    break
+
+        return best_blue, best_red
+
+    def _get_balance_quality_local(self, difference: float) -> dict:
+        if difference <= 2:
+            return {"emoji": "🟢", "text": "Excelente"}
+        elif difference <= 5:
+            return {"emoji": "🟡", "text": "Bom"}
+        elif difference <= 10:
+            return {"emoji": "🟠", "text": "Razoável"}
+        return {"emoji": "🔴", "text": "Desbalanceado"}
 
     async def _fetch_queue_message(self, queue: dict) -> discord.Message | None:
         guild = self.bot.get_guild(queue['guild_id'])
