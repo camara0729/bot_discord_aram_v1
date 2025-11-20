@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 import re
 
 from utils.database_manager import db_manager
-from utils.last_team_store import load_last_teams, clear_last_teams
+from utils.last_team_store import load_last_teams
 import config
 
 class MatchCog(commands.Cog):
@@ -382,9 +382,6 @@ class MatchCog(commands.Cog):
             await interaction.followup.send(embed=embed)
             print(f"⚡ Resultado rápido registrado (match_id={match_id})")
             
-            # Limpar times salvos após usar
-            clear_last_teams(interaction.guild.id)
-
             badges = interaction.client.get_cog('BadgesCog')
             if badges:
                 await badges.update_top_rank_badge(interaction.guild, notify=False)

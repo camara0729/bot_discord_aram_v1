@@ -166,7 +166,31 @@ class PlayerCog(commands.Cog):
     def _platform_from_riot_id(self, riot_id: Optional[str]) -> str:
         if riot_id and '#' in riot_id:
             tag = riot_id.split('#', 1)[1].lower()
-            return tag if tag else 'br1'
+            platform_map = {
+                'br': 'br1',
+                'br1': 'br1',
+                'na': 'na1',
+                'na1': 'na1',
+                'lan': 'la1',
+                'la1': 'la1',
+                'las': 'la2',
+                'la2': 'la2',
+                'euw': 'euw1',
+                'euw1': 'euw1',
+                'eune': 'eun1',
+                'eun1': 'eun1',
+                'kr': 'kr',
+                'jp': 'jp1',
+                'jp1': 'jp1',
+                'oce': 'oc1',
+                'oc1': 'oc1',
+                'tr': 'tr1',
+                'tr1': 'tr1',
+                'ru': 'ru',
+                'pbe': 'pbe1',
+                'pbe1': 'pbe1'
+            }
+            return platform_map.get(tag, 'br1')
         return 'br1'
 
     @tasks.loop(hours=24)

@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from utils.database_manager import db_manager
+from utils.ops_logger import log_ops_event, format_exception
 import config
 
 class RankingCog(commands.Cog):
@@ -35,12 +36,38 @@ class RankingCog(commands.Cog):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ Apenas administradores podem publicar o ranking.", ephemeral=True)
             return
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Comando disponível apenas dentro de servidores.", ephemeral=True)
+            return
+        if canal.guild != interaction.guild:
+            await interaction.response.send_message("⚠️ Escolha um canal do mesmo servidor.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         embed = await self._build_ranking_embed(interaction.guild, update_snapshot=True)
         if not embed:
             await interaction.followup.send("Nenhum jogador registrado ainda.", ephemeral=True)
             return
-        message = await canal.send(embed=embed)
+        try:
+            message = await canal.send(embed=embed)
+        except discord.Forbidden:
+            await interaction.followup.send("❌ Não tenho permissão para publicar naquele canal.", ephemeral=True)
+            await log_ops_event(
+                event='ranking.publish_forbidden',
+                guild_id=interaction.guild_id,
+                user_id=interaction.user.id,
+                details={'channel_id': canal.id}
+            )
+            return
+        except discord.HTTPException as exc:
+            await interaction.followup.send("❌ Não foi possível enviar o ranking. Verifique o canal e tente novamente.", ephemeral=True)
+            await log_ops_event(
+                event='ranking.publish_http_error',
+                guild_id=interaction.guild_id,
+                user_id=interaction.user.id,
+                details={'channel_id': canal.id},
+                stacktrace=format_exception(exc)
+            )
+            return
         await db_manager.set_metadata(f'ranking_channel_{interaction.guild_id}', str(canal.id))
         await db_manager.set_metadata(f'ranking_message_{interaction.guild_id}', str(message.id))
         await interaction.followup.send(f"✅ Ranking publicado em {canal.mention}.", ephemeral=True)

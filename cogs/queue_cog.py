@@ -8,20 +8,14 @@ import config
 from utils.database_manager import db_manager
 from utils.last_team_store import save_last_teams
 
-class QueueCog(commands.Cog):
+
+class QueueCog(commands.GroupCog, group_name="fila", group_description="Gerencie filas ARAM"):
     def __init__(self, bot: commands.Bot):
+        super().__init__()
         self.bot = bot
-        self.queue_group = app_commands.Group(name="fila", description="Gerencie filas ARAM")
-        self.queue_group.command(name="criar", description="Crie uma fila de jogadores para partidas ARAM.")(self.create_queue)
-        self.queue_group.command(name="status", description="Mostra o status das filas ativas.")(self.queue_status)
-        self.queue_group.command(name="cancelar", description="Cancela uma fila específica.")(self.cancel_queue)
 
     async def cog_load(self):
-        self.bot.tree.add_command(self.queue_group)
         await self._restore_views()
-
-    async def cog_unload(self):
-        self.bot.tree.remove_command(self.queue_group.name, type=self.queue_group.type)
 
     async def _restore_views(self):
         queues = await db_manager.get_active_queues()
@@ -29,6 +23,8 @@ class QueueCog(commands.Cog):
             view = QueueView(self, queue['id'])
             self.bot.add_view(view, message_id=queue['message_id'])
 
+    @app_commands.command(name="criar", description="Cria uma fila com botões de entrar/sair e montagem automática.")
+    @app_commands.guild_only()
     @app_commands.describe(
         nome="Nome da fila",
         modo="Modo ou descrição da fila",
@@ -75,6 +71,8 @@ class QueueCog(commands.Cog):
         await db_manager.update_queue_message(queue_id, message.id)
         await interaction.followup.send(f"✅ Fila `{nome}` criada em {target_channel.mention}!", ephemeral=True)
 
+    @app_commands.command(name="status", description="Mostra as filas abertas ou o status de uma fila específica.")
+    @app_commands.guild_only()
     @app_commands.describe(nome="Nome da fila (opcional)" )
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: (i.guild_id, i.user.id))
     async def queue_status(self, interaction: discord.Interaction, nome: str = None):
@@ -104,6 +102,8 @@ class QueueCog(commands.Cog):
             )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @app_commands.command(name="cancelar", description="Encerra uma fila aberta.")
+    @app_commands.guild_only()
     @app_commands.describe(nome="Nome da fila a cancelar")
     async def cancel_queue(self, interaction: discord.Interaction, nome: str):
         await interaction.response.defer(ephemeral=True)

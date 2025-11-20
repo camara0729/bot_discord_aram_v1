@@ -75,7 +75,10 @@ class SeasonCog(commands.Cog):
         embed.add_field(name="Participantes", value=str(len(players)), inline=True)
         embed.add_field(name="Iniciado por", value=interaction.user.mention, inline=True)
         embed.set_footer(text="Boa sorte na nova temporada!")
-        await channel.send(embed=embed)
+        await channel.send(
+            content=f"📣 Uma nova temporada começou! **{nome}** está valendo!",
+            embed=embed
+        )
         await interaction.followup.send("✅ Temporada iniciada com sucesso!", ephemeral=True)
 
     async def _finish_season(self, interaction: discord.Interaction, channel: discord.TextChannel):
