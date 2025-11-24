@@ -75,7 +75,14 @@ async def backup_database(backup_file: str = None):
         return None
 
 async def restore_database(backup_file: str, confirm: bool = False):
-    """Restaura banco de dados a partir de backup JSON."""
+    """Restaura banco de dados a partir de backup JSON.
+
+    Campos restaurados:
+    - players: inclui username, last_rank_sync_at, rank_sync_source
+    - matches: inclui guild_id, pdl_summary, created_at
+    - match_participants: inclui result, pdl_change, is_mvp, is_bagre, created_at
+    - metadata: preserva a flag de reset de temporada para evitar novo reset automático
+    """
     try:
         # Verificar se arquivo existe
         if not Path(backup_file).exists():
@@ -112,19 +119,21 @@ async def restore_database(backup_file: str, confirm: bool = False):
         # Restaurar jogadores
         players_data = backup_data['data']['players']
         restored_players = 0
-        
         for player in players_data:
             try:
                 async with aiosqlite.connect(db_manager.db_path) as db:
                     await db.execute('''
                         INSERT INTO players 
-                        (discord_id, riot_id, puuid, lol_rank, pdl, wins, losses, mvp_count, bagre_count, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (discord_id, riot_id, puuid, lol_rank, username, pdl, wins, losses, mvp_count, bagre_count, created_at, updated_at, last_rank_sync_at, rank_sync_source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         player['discord_id'], player['riot_id'], player['puuid'], 
-                        player.get('lol_rank', 'PRATA II'), player['pdl'], 
+                        player.get('lol_rank', 'PRATA II'),
+                        player.get('username'),
+                        player['pdl'], 
                         player['wins'], player['losses'], player['mvp_count'], player['bagre_count'],
-                        player.get('created_at'), player.get('updated_at')
+                        player.get('created_at'), player.get('updated_at'),
+                        player.get('last_rank_sync_at'), player.get('rank_sync_source')
                     ))
                     await db.commit()
                 restored_players += 1
@@ -140,12 +149,13 @@ async def restore_database(backup_file: str, confirm: bool = False):
                 async with aiosqlite.connect(db_manager.db_path) as db:
                     await db.execute('''
                         INSERT INTO matches 
-                        (match_id, blue_team, red_team, winner, mvp_id, bagre_id, duration, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (match_id, blue_team, red_team, winner, mvp_id, bagre_id, duration, guild_id, pdl_summary, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         match['match_id'], match['blue_team'], match['red_team'],
                         match['winner'], match.get('mvp_id'), match.get('bagre_id'),
-                        match.get('duration'), match.get('created_at')
+                        match.get('duration'), match.get('guild_id', 0), match.get('pdl_summary'),
+                        match.get('created_at')
                     ))
                     await db.commit()
                 restored_matches += 1
@@ -155,6 +165,36 @@ async def restore_database(backup_file: str, confirm: bool = False):
         print(f"\n✅ Restauração concluída!")
         print(f"👥 Jogadores restaurados: {restored_players}/{len(players_data)}")
         print(f"🎮 Partidas restauradas: {restored_matches}/{len(matches_data)}")
+
+        # Restaurar participantes de partidas (se existirem)
+        participants_data = backup_data['data'].get('match_participants', [])
+        restored_participants = 0
+        if participants_data:
+            async with aiosqlite.connect(db_manager.db_path) as db:
+                for mp in participants_data:
+                    try:
+                        await db.execute('''
+                            INSERT INTO match_participants
+                            (match_id, discord_id, team, champion, kills, deaths, assists, damage_dealt, result, pdl_change, is_mvp, is_bagre, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            mp['match_id'], mp['discord_id'], mp.get('team'), mp.get('champion'),
+                            mp.get('kills', 0), mp.get('deaths', 0), mp.get('assists', 0), mp.get('damage_dealt', 0),
+                            mp.get('result'), mp.get('pdl_change', 0), mp.get('is_mvp', 0), mp.get('is_bagre', 0),
+                            mp.get('created_at')
+                        ))
+                        restored_participants += 1
+                    except Exception as e:
+                        print(f"⚠️ Erro ao restaurar participante {mp.get('discord_id')}: {e}")
+                await db.commit()
+            print(f"🧾 Participações restauradas: {restored_participants}/{len(participants_data)}")
+
+        # Marcar metadata para evitar reset automático de temporada após restore
+        now_iso = datetime.now().isoformat()
+        await db_manager.set_metadata('season_reset_v2', now_iso)
+        await db_manager.set_metadata('season_active', '0')
+        await db_manager.set_metadata('season_locked', '0')
+        print(f"🔒 Metadata season_reset_v2 marcada em {now_iso}")
         
         return True
         
