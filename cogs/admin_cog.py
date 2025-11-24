@@ -4,8 +4,10 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional
 import os
+from pathlib import Path
 from utils.database_manager import db_manager
 from utils.backup_transport import send_backup_file
+from backup_restore_db import restore_database
 import config
 
 class AdminCog(commands.Cog):
@@ -121,6 +123,26 @@ class AdminCog(commands.Cog):
             await interaction.followup.send("❌ Formato inválido! Use: +10, -5, ou 1200")
         except Exception as e:
             await interaction.followup.send(f"❌ Erro: {str(e)}")
+
+    @app_commands.command(name="restaurar_backup", description="[ADMIN] Restaura dados a partir de um arquivo JSON no servidor.")
+    @app_commands.describe(
+        arquivo="Nome do arquivo JSON presente no diretório do bot (ex.: manual_restore.json)"
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def restaurar_backup(self, interaction: discord.Interaction, arquivo: str):
+        await interaction.response.defer(ephemeral=True)
+        path = Path(arquivo)
+        if not path.exists():
+            await interaction.followup.send(f"❌ Arquivo não encontrado: {arquivo}", ephemeral=True)
+            return
+        try:
+            ok = await restore_database(str(path), confirm=True)
+            if ok:
+                await interaction.followup.send(f"✅ Backup restaurado de `{arquivo}`. Use `/ranking` para validar.", ephemeral=True)
+            else:
+                await interaction.followup.send("❌ Falha ao restaurar o backup.", ephemeral=True)
+        except Exception as exc:
+            await interaction.followup.send(f"❌ Erro durante a restauração: {exc}", ephemeral=True)
 
     @app_commands.command(name="addplayer", description="[ADMIN] Adiciona jogador manualmente.")
     @app_commands.describe(
